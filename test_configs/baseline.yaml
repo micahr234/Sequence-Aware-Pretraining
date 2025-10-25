@@ -1,0 +1,52 @@
+# Baseline test configuration for sequence-aware model testing
+
+# Model Configuration
+model:
+  name: "runs/sequence-aware-baseline"  # Use the trained baseline model
+  device: "auto"
+  
+# Generation Configuration
+generation:
+  max_new_tokens: 100  # Generate more tokens for better analysis
+  num_samples: 200  # More samples for better probability estimates
+  temperature: 1.0
+  top_p: 0.9
+  top_k: 50
+  do_sample: true
+  pad_token_id: null
+  
+  # Test prompts for sequence-aware analysis
+  prompt: "The quick brown fox jumps over the lazy dog. The weather today is"
+  prompt_file: null
+  
+# Analysis Configuration
+analysis:
+  save_logits: true
+  save_probabilities: true
+  top_k_probs: 20  # Save more top probabilities for detailed analysis
+  
+  output_dir: "test_results/baseline"
+  save_format: "both"  # Save both JSON and pickle formats
+  save_visualizations: true
+  
+# Visualization Configuration
+visualization:
+  plot_top_k: 10  # Show more tokens in visualizations
+  plot_width: 14
+  plot_height: 10
+  dpi: 300
+  colormap: "plasma"
+  colorbar: true
+  
+# Experiment Configuration
+experiment:
+  name: "baseline_sequence_aware_test"
+  description: "Probability analysis of sequence-aware baseline model"
+  seed: 42
+  
+# Environment Configuration
+env:
+  hf_token_env: "RUNPOD_HF_TOKEN"
+  wandb_token_env: "RUNPOD_WANDB_TOKEN"
+  wandb_project: "sequence-aware-testing"
+  wandb_name: "baseline-probability-analysis"

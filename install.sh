@@ -206,13 +206,44 @@ EOF
 EOF
     done
     
+    # Add test run profiles for test_configs
+    local test_configs=()
+    for yaml_file in "${yaml_files[@]}"; do
+        if [[ "$yaml_file" == *"test_configs"* ]]; then
+            test_configs+=("$yaml_file")
+        fi
+    done
+    
+    # Generate test profiles for each test config
+    for test_config in "${test_configs[@]}"; do
+        local test_display_name=$(generate_display_name "$test_config")
+        echo "," >> .vscode/launch.json
+        
+        cat >> .vscode/launch.json << EOF
+        {
+            "name": "Test $test_display_name",
+            "type": "python",
+            "request": "launch",
+            "program": "\${workspaceFolder}/scripts/test.py",
+            "console": "integratedTerminal",
+            "args": ["$test_config"],
+            "python": "\${workspaceFolder}/.venv/bin/python",
+            "cwd": "\${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "\${workspaceFolder}/test_src"
+            },
+            "noDebug": true
+        }
+EOF
+    done
+    
     # Close the JSON
     cat >> .vscode/launch.json << 'EOF'
     ]
 }
 EOF
 
-    success "VS Code configuration created for ${#yaml_files[@]} YAML files"
+    success "VS Code configuration created for ${#yaml_files[@]} YAML"
 }
 
 
