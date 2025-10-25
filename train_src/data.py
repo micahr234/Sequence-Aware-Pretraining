@@ -38,14 +38,14 @@ def load_split(name: str, split: str, max_examples: int = None) -> Dataset:
             "config": "en",
             "text_field": "text",
             "transform": lambda ex: {"text": ex["text"]},
-            "streaming": False
+            "streaming": True
         },
         "c4-en": {
             "dataset_name": "allenai/c4", 
             "config": "en",
             "text_field": "text",
             "transform": lambda ex: {"text": ex["text"]},
-            "streaming": False
+            "streaming": True
         },
         "wikipedia": {
             "dataset_name": "wikipedia",
@@ -139,14 +139,32 @@ def load_split(name: str, split: str, max_examples: int = None) -> Dataset:
     try:
         config = DATASET_CONFIGS[name]
         
-        # Build split string with max_examples if specified
-        split_str = f"{split}[:{max_examples}]" if max_examples and max_examples > 0 else split
-        
-        # Load dataset
-        if config["config"]:
-            ds = load_dataset(config["dataset_name"], config["config"], split=split_str, streaming=config["streaming"])
+        # Handle streaming vs non-streaming mode differently
+        if config["streaming"]:
+            # For streaming mode, load the full split and then take the required number
+            split_str = split
+            if config["config"]:
+                print(f"Loading dataset {config['dataset_name']} with config {config['config']} and split {split_str} (streaming mode)")
+                ds = load_dataset(config["dataset_name"], config["config"], split=split_str, streaming=True)
+            else:
+                print(f"Loading dataset {config['dataset_name']} with split {split_str} (streaming mode)")
+                ds = load_dataset(config["dataset_name"], split=split_str, streaming=True)
+            
+            # Apply max_examples limit using take() for streaming datasets
+            if max_examples and max_examples > 0:
+                print(f"Taking first {max_examples} examples from streaming dataset")
+                ds = ds.take(max_examples)
         else:
-            ds = load_dataset(config["dataset_name"], split=split_str, streaming=config["streaming"])
+            # For non-streaming mode, use split slicing
+            split_str = f"{split}[:{max_examples}]" if max_examples and max_examples > 0 else split
+            
+            # Load dataset
+            if config["config"]:
+                print(f"Loading dataset {config['dataset_name']} with config {config['config']} and split {split_str}")
+                ds = load_dataset(config["dataset_name"], config["config"], split=split_str, streaming=False)
+            else:
+                print(f"Loading dataset {config['dataset_name']} with split {split_str}")
+                ds = load_dataset(config["dataset_name"], split=split_str, streaming=False)
         
         # Apply transformation
         if name in ["squad", "openbookqa"]:
@@ -155,7 +173,35 @@ def load_split(name: str, split: str, max_examples: int = None) -> Dataset:
         else:
             ds = ds.map(config["transform"])
         
+        # For streaming datasets, convert to regular Dataset for easier handling
+        if config["streaming"] and max_examples and max_examples > 0:
+            # Convert streaming dataset to regular dataset
+            examples = list(ds)
+            from datasets import Dataset
+            ds = Dataset.from_list(examples)
+        
         return ds
         
     except Exception as e:
         raise RuntimeError(f"Failed to load dataset '{name}' split '{split}': {e}")
+
+
+def load_c4_sample(max_examples: int = 100) -> Dataset:
+    """
+    Helper function to load a small sample of C4 dataset efficiently.
+    
+    Args:
+        max_examples: Number of examples to load (default: 100)
+        
+    Returns:
+        Dataset with C4 samples
+    """
+    return load_split("c4", "train", max_examples=max_examples)
+
+
+# Example usage:
+if __name__ == "__main__":
+    # This will now load only 100 examples efficiently using streaming mode
+    ds = load_c4_sample(100)
+    print(f"Loaded {len(ds)} examples from C4 dataset")
+    print("First example:", ds[0])

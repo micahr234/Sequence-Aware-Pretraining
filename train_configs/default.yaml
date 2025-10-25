@@ -30,7 +30,7 @@ dataset:
   # Effect: C4 (Clean Common Crawl) is excellent for broad pretraining with diverse web text.
   # Provides high-quality, diverse text for general language understanding.
   
-  max_examples: 1000
+  max_examples: null
   # Maximum number of examples to use from the dataset.
   # Effect: Limits the dataset size for faster experimentation. Set to null to use all examples.
   # Useful for debugging and quick experiments with smaller subsets.

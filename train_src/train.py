@@ -44,12 +44,10 @@ def train(cfg: Config):
 
     # Load model and tokenizer
     print(f"\n📥 Loading Model: {cfg.base_model_name} on {cfg.device}")
-
-    print(f"📥 Loading Model: {cfg.base_model_name}")
     model = AutoModelForCausalLM.from_pretrained(
         cfg.base_model_name,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto" if cfg.device != "cpu" else None,
+        dtype=torch.float32,
+        device_map=cfg.device,
     )
 
     # Set dropout if specified
@@ -61,8 +59,6 @@ def train(cfg: Config):
     tokenizer = AutoTokenizer.from_pretrained(cfg.base_model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-
-    # Set tokenizer max length
     tokenizer.model_max_length = cfg.max_seq_length
 
     # Training arguments
@@ -78,21 +74,21 @@ def train(cfg: Config):
         lr_scheduler_type=cfg.scheduler_type,
         logging_steps=cfg.log_every,
         save_steps=cfg.save_every,
-        fp16=torch.cuda.is_available() and cfg.device != "cpu",
+        fp16=False,  # Disable FP16 to avoid gradient scaling issues
         bf16=False,
-        report_to=cfg.wandb_project,
+        report_to="wandb",
+        project=cfg.wandb_project,
+        run_name=cfg.wandb_name,
         remove_unused_columns=False,
     )
 
     # Create trainer with discounted log-suffix weighting
     trainer = DiscountedLogSuffixSFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,  # Use processing_class instead of tokenizer
         train_dataset=dataset,
         args=training_args,
-        dataset_text_field="text",
-        packing=False,  # Keep sequences un-packed for position-based weighting
-        max_seq_length=cfg.max_seq_length,
+        formatting_func=lambda x: x["text"],  # Format the dataset text field
         gamma=cfg.gamma,  # Discount factor for position weighting
     )
 

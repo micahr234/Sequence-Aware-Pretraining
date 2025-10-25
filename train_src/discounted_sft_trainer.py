@@ -39,26 +39,27 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
         device = labels.device
         B, T = labels.shape
         valid = (labels != -100).to(torch.float32)              # [B, T]
-        lengths = valid.sum(dim=1).to(torch.int64)              # [B]
-
-        # Build 1..T index grid, then per-row "running index over valid tokens"
-        idx = torch.arange(T, device=device).unsqueeze(0).expand(B, T)  # [B, T]
-        # Turn valid mask into cumulative count per row
-        k = (valid.cumsum(dim=1)) * valid                        # k in {0..L_i} at valid positions
+        
+        # Build cumulative count per row for valid positions only
+        k = valid.cumsum(dim=1) * valid                         # k in {0..L_i} at valid positions
+        
+        # Ensure k is non-negative and handle edge cases
+        k = k.clamp_min(0)
 
         if abs(1.0 - self.gamma) < 1e-8:
-            w = k.to(torch.float32)  # when gamma=1, w_k = k / L_i
+            w = k.to(torch.float32)  # when gamma=1, w_k = k
         else:
-            # w_k = (1 - gamma^k)
-            w = (1.0 - (self.gamma ** k.clamp_min(0)))
-            w = w.to(torch.float32)
+            # w_k = (1 - gamma^k) for k > 0, 0 for k = 0
+            # Use a more numerically stable computation
+            gamma_pow_k = torch.pow(self.gamma, k.clamp_min(0))
+            w = (1.0 - gamma_pow_k).to(torch.float32)
 
         # Zero out invalid spots explicitly
         w = w * valid
         
-        return w.no_grad()  # [B, T], zeros where labels == -100
+        return w  # [B, T], zeros where labels == -100
 
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Replace standard CE with discounted log-suffix weighted CE.
         
@@ -66,6 +67,7 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
             model: The model being trained
             inputs: Dictionary containing input tensors including 'labels'
             return_outputs: Whether to return model outputs along with loss
+            num_items_in_batch: Number of items in the batch (for compatibility)
             
         Returns:
             loss: Weighted cross-entropy loss (scalar tensor for optimization)
@@ -77,7 +79,19 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
 
         # log p(w_k) at each labeled position
         log_probs = F.log_softmax(logits, dim=-1)
-        token_logp = log_probs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)  # [B, T]
+        
+        # Ensure labels are within vocabulary bounds
+        vocab_size = logits.size(-1)
+        labels_clamped = labels.clamp(0, vocab_size - 1)
+        
+        # Create mask for valid positions (not -100)
+        valid_mask = (labels != -100)
+        
+        # Gather log probabilities, but only for valid positions
+        token_logp = log_probs.gather(dim=-1, index=labels_clamped.unsqueeze(-1)).squeeze(-1)  # [B, T]
+        
+        # Set invalid positions to 0 (they'll be masked out anyway)
+        token_logp = token_logp * valid_mask.float()
 
         # Build weights for labeled positions
         with torch.no_grad():
@@ -108,12 +122,13 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
             return self._unweighted_loss[-1]
         return None
 
-    def log(self, logs):
+    def log(self, logs, start_time=None):
         """
         Override logging to include unweighted loss.
         
         Args:
             logs: Dictionary of metrics to log
+            start_time: Optional start time for logging (passed to parent)
         """
         # Add unweighted loss to logs if available
         unweighted_loss = self.get_unweighted_loss()
@@ -121,4 +136,4 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
             logs['unweighted_loss'] = unweighted_loss
         
         # Call parent logging method
-        super().log(logs)
+        super().log(logs, start_time)

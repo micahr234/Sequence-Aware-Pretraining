@@ -8,7 +8,7 @@ model:
 # Dataset Configuration
 dataset:
   name: "c4"
-  max_examples: 100
+  max_examples: 100000
 
 # Training Configuration
 training:
@@ -22,8 +22,8 @@ training:
   # Training Schedule
   schedule:
     num_epochs: 1
-    batch_size: 16
-    grad_accumulation_steps: 4
+    batch_size: 64
+    grad_accumulation_steps: 1
     warmup_steps: 0
     warmup_ratio: 0.03
     scheduler_type: "cosine"
