@@ -31,74 +31,131 @@ def load_split(name: str, split: str, max_examples: int = None) -> Dataset:
     - "squad": Reading comprehension
     - "openbookqa": Science questions
     """
+    # Dataset configuration mapping
+    DATASET_CONFIGS = {
+        "c4": {
+            "dataset_name": "allenai/c4",
+            "config": "en",
+            "text_field": "text",
+            "transform": lambda ex: {"text": ex["text"]},
+            "streaming": False
+        },
+        "c4-en": {
+            "dataset_name": "allenai/c4", 
+            "config": "en",
+            "text_field": "text",
+            "transform": lambda ex: {"text": ex["text"]},
+            "streaming": False
+        },
+        "wikipedia": {
+            "dataset_name": "wikipedia",
+            "config": "20220301.en", 
+            "text_field": "text",
+            "transform": lambda ex: {"text": f"Title: {ex['title']}\n\n{ex['text']}"},
+            "streaming": False
+        },
+        "wiki": {
+            "dataset_name": "wikipedia",
+            "config": "20220301.en",
+            "text_field": "text", 
+            "transform": lambda ex: {"text": f"Title: {ex['title']}\n\n{ex['text']}"},
+            "streaming": False
+        },
+        "bookcorpus": {
+            "dataset_name": "bookcorpus",
+            "config": None,
+            "text_field": "text",
+            "transform": lambda ex: {"text": ex["text"]},
+            "streaming": False
+        },
+        "books": {
+            "dataset_name": "bookcorpus",
+            "config": None,
+            "text_field": "text",
+            "transform": lambda ex: {"text": ex["text"]},
+            "streaming": False
+        },
+        "openwebtext": {
+            "dataset_name": "openwebtext",
+            "config": None,
+            "text_field": "text",
+            "transform": lambda ex: {"text": ex["text"]},
+            "streaming": False
+        },
+        "owt": {
+            "dataset_name": "openwebtext",
+            "config": None,
+            "text_field": "text",
+            "transform": lambda ex: {"text": ex["text"]},
+            "streaming": False
+        },
+        "gsm8k": {
+            "dataset_name": "gsm8k",
+            "config": "main",
+            "text_field": "text",
+            "transform": lambda ex: {"text": f"Question: {ex['question']}\nAnswer: {extract_gsm8k_final(ex['answer'])}"},
+            "streaming": False
+        },
+        "gsm": {
+            "dataset_name": "gsm8k",
+            "config": "main",
+            "text_field": "text",
+            "transform": lambda ex: {"text": f"Question: {ex['question']}\nAnswer: {extract_gsm8k_final(ex['answer'])}"},
+            "streaming": False
+        },
+        "gsm-8k": {
+            "dataset_name": "gsm8k",
+            "config": "main",
+            "text_field": "text",
+            "transform": lambda ex: {"text": f"Question: {ex['question']}\nAnswer: {extract_gsm8k_final(ex['answer'])}"},
+            "streaming": False
+        },
+        "squad": {
+            "dataset_name": "squad",
+            "config": None,
+            "text_field": "text",
+            "transform": lambda ex: {
+                "text": f"Question: {ex['question']}\nAnswer: {ex['answers']['text'][0] if ex['answers']['text'] else ''}"
+            },
+            "streaming": False
+        },
+        "openbookqa": {
+            "dataset_name": "openbookqa",
+            "config": "main",
+            "text_field": "text",
+            "transform": lambda ex: {
+                "text": f"Question: {ex['question_stem']}\nAnswer: {ex['choices']['text'][ord(ex['answerKey'].strip()) - ord('A')]}"
+            },
+            "streaming": False
+        }
+    }
+    
     name = name.lower()
+    
+    if name not in DATASET_CONFIGS:
+        supported = ", ".join(set(config["dataset_name"] for config in DATASET_CONFIGS.values()))
+        raise ValueError(f"Unknown dataset: {name}. Supported: {supported}")
+    
     try:
-        if name in ["c4", "c4-en"]:
-            # Clean Common Crawl - excellent for broad pretraining
-            ds = load_dataset("allenai/c4", "en", split=split, streaming=False)
-            # Use the text field directly
-            ds = ds.map(lambda ex: {"text": ex["text"]})
-            if max_examples and max_examples > 0:
-                ds = ds.select(range(min(max_examples, len(ds))))
-            return ds
-            
-        elif name in ["wikipedia", "wiki"]:
-            # Wikipedia articles - good for factual knowledge
-            ds = load_dataset("wikipedia", "20220301.en", split=split)
-            # Combine title and text
-            ds = ds.map(lambda ex: {"text": f"Title: {ex['title']}\n\n{ex['text']}"})
-            if max_examples and max_examples > 0:
-                ds = ds.select(range(min(max_examples, len(ds))))
-            return ds
-            
-        elif name in ["bookcorpus", "books"]:
-            # BookCorpus - good for narrative text
-            ds = load_dataset("bookcorpus", split=split)
-            ds = ds.map(lambda ex: {"text": ex["text"]})
-            if max_examples and max_examples > 0:
-                ds = ds.select(range(min(max_examples, len(ds))))
-            return ds
-            
-        elif name in ["openwebtext", "owt"]:
-            # OpenWebText - diverse web text
-            ds = load_dataset("openwebtext", split=split)
-            ds = ds.map(lambda ex: {"text": ex["text"]})
-            if max_examples and max_examples > 0:
-                ds = ds.select(range(min(max_examples, len(ds))))
-            return ds
-            
-        elif name in ["gsm8k", "gsm", "gsm-8k"]:
-            # Math reasoning - specialized task
-            ds = load_dataset("gsm8k", "main", split=split)
-            ds = ds.map(lambda ex: {"text": f"Question: {ex['question']}\nAnswer: {extract_gsm8k_final(ex['answer'])}"})
-            if max_examples and max_examples > 0:
-                ds = ds.select(range(min(max_examples, len(ds))))
-            return ds
-            
-        elif name in ["squad"]:
-            # Reading comprehension
-            ds = load_dataset("squad", split=split)
-            def to_fields(ex):
-                ans = ex["answers"]["text"][0] if ex["answers"]["text"] else ""
-                return {"text": f"Question: {ex['question']}\nAnswer: {ans}"}
-            ds = ds.map(to_fields, remove_columns=[c for c in ds.column_names if c not in ["text"]])
-            if max_examples and max_examples > 0:
-                ds = ds.select(range(min(max_examples, len(ds))))
-            return ds
-            
-        elif name in ["openbookqa"]:
-            # Science questions
-            ds = load_dataset("openbookqa", "main", split=split)
-            def to_fields(ex):
-                idx = ord(ex["answerKey"].strip()) - ord("A")
-                choice = ex["choices"]["text"][idx]
-                return {"text": f"Question: {ex['question_stem']}\nAnswer: {choice}"}
-            ds = ds.map(to_fields, remove_columns=[c for c in ds.column_names if c not in ["text"]])
-            if max_examples and max_examples > 0:
-                ds = ds.select(range(min(max_examples, len(ds))))
-            return ds
-            
+        config = DATASET_CONFIGS[name]
+        
+        # Build split string with max_examples if specified
+        split_str = f"{split}[:{max_examples}]" if max_examples and max_examples > 0 else split
+        
+        # Load dataset
+        if config["config"]:
+            ds = load_dataset(config["dataset_name"], config["config"], split=split_str, streaming=config["streaming"])
         else:
-            raise ValueError(f"Unknown dataset: {name}. Supported: c4, wikipedia, bookcorpus, openwebtext, gsm8k, squad, openbookqa")
+            ds = load_dataset(config["dataset_name"], split=split_str, streaming=config["streaming"])
+        
+        # Apply transformation
+        if name in ["squad", "openbookqa"]:
+            # These need special handling for column removal
+            ds = ds.map(config["transform"], remove_columns=[c for c in ds.column_names if c not in ["text"]])
+        else:
+            ds = ds.map(config["transform"])
+        
+        return ds
+        
     except Exception as e:
         raise RuntimeError(f"Failed to load dataset '{name}' split '{split}': {e}")
