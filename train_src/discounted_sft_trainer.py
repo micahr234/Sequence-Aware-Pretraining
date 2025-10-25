@@ -47,16 +47,16 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
         k = (valid.cumsum(dim=1)) * valid                        # k in {0..L_i} at valid positions
 
         if abs(1.0 - self.gamma) < 1e-8:
-            w = k.to(torch.float32)  # when gamma=1, w_k = k
+            w = k.to(torch.float32)  # when gamma=1, w_k = k / L_i
         else:
-            # w_k = (1 - gamma^k)/(1 - gamma), with k=0 at invalid positions -> weight 0
+            # w_k = (1 - gamma^k)
             w = (1.0 - (self.gamma ** k.clamp_min(0)))
             w = w.to(torch.float32)
 
         # Zero out invalid spots explicitly
         w = w * valid
         
-        return w  # [B, T], zeros where labels == -100
+        return w.no_grad()  # [B, T], zeros where labels == -100
 
     def compute_loss(self, model, inputs, return_outputs=False):
         """
@@ -68,7 +68,7 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
             return_outputs: Whether to return model outputs along with loss
             
         Returns:
-            loss: Weighted cross-entropy loss
+            loss: Weighted cross-entropy loss (scalar tensor for optimization)
             outputs: Model outputs (if return_outputs=True)
         """
         labels = inputs.get("labels")
@@ -84,7 +84,41 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
             weights = self._position_weights(labels)  # [B, T]
             denom = (labels != -100).sum().clamp_min(1)
 
-        # Weighted (negative) log-likelihood, averaged over valid tokens
-        loss = -(weights * token_logp).sum() / denom
+        # Calculate unweighted loss (standard cross-entropy) for logging
+        unweighted_loss = -token_logp.sum() / denom
+        
+        # Calculate weighted (negative) log-likelihood, averaged over valid tokens
+        weighted_loss = -(weights * token_logp).sum() / denom
 
-        return (loss, outputs) if return_outputs else loss
+        # Store unweighted loss for logging (accessible via trainer.log_metrics)
+        if not hasattr(self, '_unweighted_loss'):
+            self._unweighted_loss = []
+        self._unweighted_loss.append(unweighted_loss.detach().cpu().item())
+
+        return (weighted_loss, outputs) if return_outputs else weighted_loss
+
+    def get_unweighted_loss(self):
+        """
+        Get the most recent unweighted loss value.
+        
+        Returns:
+            float: The most recent unweighted loss value, or None if not available
+        """
+        if hasattr(self, '_unweighted_loss') and self._unweighted_loss:
+            return self._unweighted_loss[-1]
+        return None
+
+    def log(self, logs):
+        """
+        Override logging to include unweighted loss.
+        
+        Args:
+            logs: Dictionary of metrics to log
+        """
+        # Add unweighted loss to logs if available
+        unweighted_loss = self.get_unweighted_loss()
+        if unweighted_loss is not None:
+            logs['unweighted_loss'] = unweighted_loss
+        
+        # Call parent logging method
+        super().log(logs)
