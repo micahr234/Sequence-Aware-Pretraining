@@ -50,20 +50,11 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
             w = k.to(torch.float32)  # when gamma=1, w_k = k
         else:
             # w_k = (1 - gamma^k)/(1 - gamma), with k=0 at invalid positions -> weight 0
-            w = (1.0 - (self.gamma ** k.clamp_min(0))) / (1.0 - self.gamma)
+            w = (1.0 - (self.gamma ** k.clamp_min(0)))
             w = w.to(torch.float32)
 
         # Zero out invalid spots explicitly
         w = w * valid
-        
-        # Scale weights by the theoretical maximum weight for infinite sequence
-        # For infinite sequence: lim(k→∞) (1 - gamma^k)/(1 - gamma) = 1/(1 - gamma)
-        if abs(1.0 - self.gamma) < 1e-8:
-            # When gamma=1, weights grow linearly without bound, so no normalization
-            pass  # Keep original weights
-        else:
-            theoretical_max = 1.0 / (1.0 - self.gamma)
-            w = w / theoretical_max
         
         return w  # [B, T], zeros where labels == -100
 

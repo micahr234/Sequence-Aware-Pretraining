@@ -24,6 +24,8 @@ class Config:
     # Optimizer settings
     lr: float
     weight_decay: float
+    gamma: float
+    dropout: Optional[float]
     
     # Training schedule
     num_epochs: int
@@ -33,8 +35,6 @@ class Config:
     warmup_ratio: Optional[float]
     scheduler_type: Optional[str]
     
-    # SFT training parameters
-    gamma: float
     
     
     # Training control
@@ -42,7 +42,7 @@ class Config:
     log_every: int
     
     # Training parameters
-    max_prompt_len: int
+    max_seq_length: int
     
     # Output configuration
     output_dir: str
@@ -56,16 +56,7 @@ class Config:
     hf_token_env: Optional[str]
     wandb_token_env: Optional[str]
 
-    # LoRA configuration
-    lora_enable: Optional[bool]
-    lora_r: Optional[int]
-    lora_alpha: Optional[float]
-    lora_dropout: Optional[float]
-    lora_target_modules: Optional[List[str]]
-    lora_modules_to_save: Optional[List[str]]
 
-    # Format configuration
-    prompt_template: str
 
 
 def load_config(config_path: str = "train_configs/default.yaml") -> Config:
@@ -100,6 +91,8 @@ def load_config(config_path: str = "train_configs/default.yaml") -> Config:
         # Optimizer settings
         "lr": yaml_cfg.training.optimizer.lr,
         "weight_decay": yaml_cfg.training.optimizer.weight_decay,
+        "gamma": yaml_cfg.training.optimizer.gamma,
+        "dropout": yaml_cfg.training.optimizer.dropout,
         
         # Training schedule
         "num_epochs": yaml_cfg.training.schedule.num_epochs,
@@ -109,8 +102,6 @@ def load_config(config_path: str = "train_configs/default.yaml") -> Config:
         "warmup_ratio": yaml_cfg.training.schedule.warmup_ratio,
         "scheduler_type": yaml_cfg.training.schedule.scheduler_type,
         
-        # SFT training parameters
-        "gamma": yaml_cfg.training.sft.gamma,
         
         
         # Training control
@@ -118,7 +109,7 @@ def load_config(config_path: str = "train_configs/default.yaml") -> Config:
         "log_every": yaml_cfg.training.control.log_every,
         
         # Training parameters
-        "max_prompt_len": yaml_cfg.training_params.max_prompt_len,
+        "max_seq_length": yaml_cfg.training_params.max_seq_length,
         
         # Output configuration
         "output_dir": yaml_cfg.output.dir,
@@ -131,17 +122,6 @@ def load_config(config_path: str = "train_configs/default.yaml") -> Config:
         # Environment variable names for authentication
         "hf_token_env": yaml_cfg.env_vars.hf_token,
         "wandb_token_env": yaml_cfg.env_vars.wandb_token,
-
-        # LoRA configuration (no defaults here; rely on YAML values)
-        "lora_enable": yaml_cfg.model.lora.enable,
-        "lora_r": yaml_cfg.model.lora.r,
-        "lora_alpha": yaml_cfg.model.lora.alpha,
-        "lora_dropout": yaml_cfg.model.lora.dropout,
-        "lora_target_modules": yaml_cfg.model.lora.target_modules,
-        "lora_modules_to_save": yaml_cfg.model.lora.modules_to_save,
-
-        # Format configuration
-        "prompt_template": yaml_cfg.format.prompt_template,
     }
     
     return Config(**cfg_dict)

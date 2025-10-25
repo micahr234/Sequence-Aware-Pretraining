@@ -64,8 +64,8 @@ model:
   output_name: "sequence-aware-model"  # Output model name
 
 dataset:
-  name: "gsm8k"                        # Dataset to use
-  max_examples: 100                     # Limit dataset size
+  name: "c4"                          # Dataset to use (C4 for broad pretraining)
+  max_examples: 1000                   # Limit dataset size
 
 training:
   optimizer:
@@ -79,16 +79,20 @@ training:
   
   sft:
     gamma: 0.98                        # Discount factor for position weighting
-
-format:
-  prompt_template: "Question: {question}\nAnswer:"
 ```
 
 ## Supported Datasets
 
-- **GSM8K**: Math word problems (default)
-- **SQuAD**: Reading comprehension  
-- **OpenBookQA**: Science questions
+### Broad Pretraining (Recommended)
+- **C4**: Clean Common Crawl dataset - excellent for general language understanding
+- **Wikipedia**: Wikipedia articles - good for factual knowledge
+- **BookCorpus**: BookCorpus dataset - good for narrative text
+- **OpenWebText**: Diverse web text - good for conversational understanding
+
+### Specialized Tasks
+- **GSM8K**: Math word problems - for reasoning tasks
+- **SQuAD**: Reading comprehension - for QA tasks
+- **OpenBookQA**: Science questions - for knowledge tasks
 
 ## Training Approach
 
