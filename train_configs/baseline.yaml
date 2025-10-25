@@ -1,0 +1,53 @@
+# Baseline experiment configuration for Sequence-Aware Pretraining
+
+# Model Configuration
+model:
+  base_name: "gpt2"
+  output_name: "sequence-aware-baseline"
+
+# Dataset Configuration
+dataset:
+  name: "gsm8k"
+  max_examples: 500
+
+# Training Configuration
+training:
+  # Optimizer Settings
+  optimizer:
+    lr: 2e-5
+    weight_decay: 0.01
+
+  # Training Schedule
+  schedule:
+    num_epochs: 3
+    batch_size: 4
+    grad_accumulation_steps: 4
+    warmup_ratio: 0.1
+    scheduler_type: "linear"
+
+  # SFT Training Parameters
+  sft:
+    gamma: 0.95
+
+  # Training Control
+  control:
+    seed: 42
+    log_every: 10
+
+# Training Parameters
+training_params:
+  max_prompt_len: 256
+
+# Output Configuration
+output:
+  dir: "runs/sequence-aware-baseline"
+  save_every: 500
+
+# Weights & Biases Configuration
+wandb:
+  project: "sequence-aware-pretraining"
+  name: "baseline"
+
+# Format Configuration
+format:
+  prompt_template: "Question: {question}\nAnswer:"

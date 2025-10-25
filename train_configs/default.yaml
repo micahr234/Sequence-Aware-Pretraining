@@ -1,0 +1,194 @@
+# Default configuration for Sequence-Aware Pretraining
+
+# Model Configuration
+model:
+  base_name: "gpt2"
+  # Base model to be trained using Discounted Log-Suffix SFT.
+  # Effect: The foundation model that will be fine-tuned. Should be a causal language model
+  # compatible with the task. GPT-2 provides a good balance of performance and efficiency.
+  
+  output_name: "sequence-aware-pretraining-default"
+  # Name for the fine-tuned model when pushing to Hugging Face Hub.
+  # Effect: This exact name will be used for the hub repository.
+  # Should be unique to avoid conflicts with existing models.
+  
+  
+  # Parameter-Efficient Fine-Tuning (LoRA)
+  lora:
+    enable: false
+    # Enable LoRA adapter training. When true, base model weights are frozen
+    # and only low-rank adapters are trained.
+    r: 16
+    # Rank of LoRA decomposition.
+    alpha: 16.0
+    # Scaling factor for LoRA updates.
+    dropout: 0.0
+    # Dropout applied to LoRA layers.
+    target_modules: null
+    # Optional list of target module names to apply LoRA to.
+    modules_to_save: null
+    # Optional list of module names to save (not freeze) during LoRA training.
+    # These modules will be fully trained alongside LoRA adapters.
+
+# Hardware Configuration
+hardware:
+  device: "auto"
+  # Device to run training on.
+  # Proposed by: PyTorch framework for device management.
+  # Effect: "auto" automatically selects CUDA if available, otherwise CPU. Can be explicitly
+  # set to "cuda", "cpu", or specific device IDs like "cuda:0".
+  # Reference: https://pytorch.org/docs/stable/tensor_attributes.html#torch.device
+
+# Dataset Configuration
+dataset:
+  name: "gsm8k"
+  # Dataset to use for training.
+  # Effect: GSM8K is a dataset of grade school math problems that tests reasoning ability.
+  # The model will be trained to solve step-by-step mathematical reasoning problems.
+  
+  max_examples: 100
+  # Maximum number of examples to use from the dataset.
+  # Effect: Limits the dataset size for faster experimentation. Set to null to use all examples.
+  # Useful for debugging and quick experiments with smaller subsets.
+
+# Training Configuration
+training:
+  # Optimizer Settings
+  optimizer:
+    lr: 2.5e-6
+    # Learning rate for the optimizer.
+    # Proposed by: Robbins and Monro in "A Stochastic Approximation Method".
+    # Effect: Controls the step size of parameter updates. Lower values lead to more stable
+    # but slower convergence. SFT typically uses lower learning rates than standard training.
+    # Reference: https://projecteuclid.org/journals/annals-of-mathematical-statistics/volume-22/issue-3/A-Stochastic-Approximation-Method/10.1214/aoms/1177729586.full
+    
+    weight_decay: 0.01
+    # L2 regularization coefficient for the optimizer.
+    # Proposed by: Tikhonov in regularization theory.
+    # Effect: Prevents overfitting by penalizing large parameter values. Higher values
+    # encourage smaller weights but may hurt model performance.
+    # Reference: https://en.wikipedia.org/wiki/Tikhonov_regularization
+    # Note: Experments have shown that mode collapse is more likely to occur when weight decay is too high.
+
+  # Training Schedule
+  schedule:
+    num_epochs: 1
+    # Number of complete passes through the training dataset.
+    # Proposed by: Standard practice in machine learning training.
+    # Effect: More epochs allow the model to see the data multiple times but increase
+    # training time and risk of overfitting. SFT often uses fewer epochs than standard training.
+    # Reference: Standard ML training practice
+    
+    batch_size: 2
+    # Number of examples processed in each training step.
+    # Proposed by: Standard practice in stochastic gradient descent.
+    # Effect: Larger batches provide more stable gradients but require more memory.
+    # Smaller batches are more noisy but can help escape local minima.
+    # Reference: https://en.wikipedia.org/wiki/Stochastic_gradient_descent
+    
+    grad_accumulation_steps: 12
+    # Number of gradient accumulation steps before updating parameters.
+    # Proposed by: Chen et al. in "Large-Scale Machine Learning with Stochastic Gradient Descent".
+    # Effect: Simulates larger batch sizes by accumulating gradients over multiple steps.
+    # Effective batch size = batch_size × grad_accumulation_steps.
+    # Reference: https://dl.acm.org/doi/10.1145/2020408.2020421
+    
+    warmup_steps: 0
+    # Number of warmup steps for learning rate scheduling.
+    # Proposed by: Vaswani et al. in "Attention Is All You Need".
+    # Effect: Gradually increases learning rate from 0 to target value over warmup steps.
+    # Helps with training stability, especially for large models.
+    # Reference: https://arxiv.org/abs/1706.03762
+    
+    warmup_ratio: 0.1
+    # Warmup ratio as a fraction of total training steps.
+    # Proposed by: Standard practice in learning rate scheduling.
+    # Effect: When warmup_steps is 0, warmup_ratio determines the number of warmup steps
+    # as a fraction of total training steps. Provides flexibility in warmup scheduling.
+    # Reference: Standard practice in transformer training
+    
+    scheduler_type: "linear"  # Options: "linear", "cosine", "constant", "polynomial"
+    # Type of learning rate scheduler to use.
+    # Proposed by: Various sources - "cosine" by Loshchilov and Hutter.
+    # Effect: "cosine" uses cosine annealing, "linear" uses linear decay,
+    # "constant" keeps LR fixed, "polynomial" uses polynomial decay.
+    # Reference: https://arxiv.org/abs/1608.03983
+
+  # SFT Training Parameters
+  sft:
+    gamma: 0.98
+    # Discount factor for position-based weighting in discounted log-suffix training.
+    # Effect: Controls how much weight is given to later tokens in the sequence.
+    # Higher values (closer to 1.0) give more weight to later tokens.
+    # When gamma=1.0, weights become linear: w_k = k.
+    
+
+  # Training Control
+  control:
+    seed: 42
+    # Random seed for reproducibility.
+    # Proposed by: Standard practice in scientific computing for reproducibility.
+    # Effect: Ensures reproducible results by fixing random number generation.
+    # Critical for scientific experiments and debugging.
+    # Reference: https://en.wikipedia.org/wiki/Random_seed
+    
+    log_every: 10
+    # Frequency of logging training metrics.
+    # Proposed by: Standard practice in ML training monitoring.
+    # Effect: Controls how often training progress is logged. More frequent logging
+    # provides better monitoring but increases I/O overhead.
+    # Reference: Standard ML training practice
+
+# Training Parameters
+training_params:
+  max_prompt_len: 512
+  # Maximum length of input sequences.
+  # Effect: Longer sequences allow more context but increase memory usage and
+  # computational cost. Must fit within model's context window.
+
+# Output Configuration
+output:
+  dir: "runs/default"
+  # Directory to save model checkpoints and outputs.
+  # Proposed by: Standard practice in ML training for output management.
+  # Effect: All training outputs (checkpoints, logs, etc.) will be saved to this directory.
+  # Should be unique for each experiment to avoid conflicts.
+  # Reference: Standard ML training practice
+  
+  save_every: 1000
+  # Frequency of model checkpoint saving.
+  # Proposed by: Standard practice in ML training for checkpoint management.
+  # Effect: Saves model checkpoints every N steps. More frequent saving provides
+  # better recovery options but increases I/O overhead and disk usage.
+  # Reference: Standard ML training practice
+
+# Weights & Biases Configuration
+wandb:
+  project: "reasoner-v1"
+  # Weights & Biases project name for experiment tracking.
+  # Proposed by: Weights & Biases for ML experiment management.
+  # Effect: Groups related experiments together in the W&B dashboard.
+  # Should be consistent across related experiments.
+  # Reference: https://docs.wandb.ai/
+  
+  name: "default"
+  # Weights & Biases run name for this specific experiment.
+  # Proposed by: Weights & Biases for ML experiment management.
+  # Effect: Identifies this specific run in the W&B dashboard. Should be unique
+  # for each experiment to avoid confusion.
+  # Reference: https://docs.wandb.ai/
+
+# Format Configuration
+format:
+  prompt_template: "Question: {question}\nAnswer:"
+  # Template for formatting questions for training.
+  # Effect: Simple template that formats the question for the model to learn from.
+  # The {question} placeholder will be replaced with the actual question text.
+
+# Environment Variable Names for Authentication
+env_vars:
+  hf_token: "RUNPOD_HF_TOKEN"      # Hugging Face token environment variable name
+  # Environment variable name containing the Hugging Face authentication token.
+  
+  wandb_token: "RUNPOD_WANDB_TOKEN"  # Weights & Biases token environment variable name
+  # Environment variable name containing the Weights & Biases API key.
