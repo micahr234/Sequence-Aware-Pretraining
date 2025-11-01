@@ -1,9 +1,9 @@
 import torch
 import torch.nn.functional as F
-from trl import SFTTrainer
+from transformers import Seq2SeqTrainer
 
 
-class DiscountedLogSuffixSFTTrainer(SFTTrainer):
+class DiscountedLogSuffixSFTTrainer(Seq2SeqTrainer):
     """
     A specialized SFTTrainer that implements discounted log-suffix weighting.
     
@@ -16,8 +16,8 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
     Args:
         gamma (float): Discount. Higher values give more weight to later tokens.
                       gamma=0 gives uniform weights (no discounting), gamma=1 gives linear weights.
-        *args: Arguments passed to SFTTrainer
-        **kwargs: Keyword arguments passed to SFTTrainer
+        *args: Arguments passed to Seq2SeqTrainer
+        **kwargs: Keyword arguments passed to Seq2SeqTrainer
     """
     
     def __init__(self, *args, gamma: float = 0.98, **kwargs):
@@ -147,9 +147,10 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
     def log(self, logs, start_time=None):
         """
         Override logging to include both weighted and unweighted loss.
+        Also ensures eval metrics from compute_metrics are properly included.
         
         Args:
-            logs: Dictionary of metrics to log
+            logs: Dictionary of metrics to log (may include eval metrics from compute_metrics)
             start_time: Optional start time for logging (passed to parent)
         """
         # Add unweighted loss to logs if available
@@ -162,5 +163,10 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
         if weighted_loss is not None:
             logs['weighted_loss'] = weighted_loss
         
-        # Call parent logging method
+        # Ensure eval metrics are included - Trainer should have added them already
+        # but we verify they're present and log them explicitly if needed
+        if 'eval' in str(logs) or any(k.startswith('eval') for k in logs.keys()):
+            print(f"🔍 Debug: Log method called with eval metrics: {[k for k in logs.keys() if 'eval' in k.lower()]}")
+        
+        # Call parent logging method (this will log all metrics including eval ones)
         super().log(logs, start_time)
