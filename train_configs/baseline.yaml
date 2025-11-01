@@ -2,12 +2,12 @@
 
 # Model Configuration
 model:
-  base_name: "gpt2"
+  base_name: "meta-llama/Llama-3.1-8B"
   output_name: "sequence-aware-baseline"
 
 # Dataset Configuration
 dataset:
-  name: "c4"
+  name: "gsm8k"
   max_examples: 100000
 
 # Training Configuration

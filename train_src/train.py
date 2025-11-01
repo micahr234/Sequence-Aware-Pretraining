@@ -12,6 +12,7 @@ from config import Config
 from data import load_split
 from utils import set_seed
 from discounted_sft_trainer import DiscountedLogSuffixSFTTrainer
+from data_collator import AttentionMaskDataCollator
 
 
 def train(cfg: Config):
@@ -82,13 +83,20 @@ def train(cfg: Config):
         remove_unused_columns=False,
     )
 
+    # Create custom data collator that converts char-level masks to token-level labels
+    data_collator = AttentionMaskDataCollator(
+        tokenizer=tokenizer,
+        mlm=False,  # We're doing causal LM, not masked LM
+    )
+    
     # Create trainer with discounted log-suffix weighting
     trainer = DiscountedLogSuffixSFTTrainer(
         model=model,
-        processing_class=tokenizer,  # Use processing_class instead of tokenizer
+        tokenizer=tokenizer,  # Use tokenizer parameter
         train_dataset=dataset,
         args=training_args,
-        formatting_func=lambda x: x["text"],  # Format the dataset text field
+        formatting_func=lambda x: {"text": x["text"], "attention_mask": x["attention_mask"]},  # Keep both fields
+        data_collator=data_collator,  # Use our custom collator
         gamma=cfg.gamma,  # Discount factor for position weighting
     )
 
