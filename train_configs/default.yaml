@@ -2,7 +2,7 @@
 
 # Model Configuration
 model:
-  base_name: "gpt2"
+  base_name: "Qwen/Qwen3-4B-Base"
   # Base model to be trained using Discounted Log-Suffix SFT.
   # Effect: The foundation model that will be fine-tuned. Should be a causal language model
   # compatible with the task. GPT-2 provides a good balance of performance and efficiency.
@@ -12,10 +12,6 @@ model:
   # Effect: This exact name will be used for the hub repository.
   # Should be unique to avoid conflicts with existing models.
   
-  
-
-# Hardware Configuration
-hardware:
   device: "auto"
   # Device to run training on.
   # Proposed by: PyTorch framework for device management.
@@ -37,14 +33,36 @@ dataset:
 
 # Training Configuration
 training:
+  # Training Parameters
+  parameters:
+    max_seq_length: 1024
+    # Maximum length of input sequences.
+    # Effect: Standard length for pretraining. Longer sequences for better context.
+    # Typical range for pretraining: 512-2048.
+    
+    train_on_answers_only: false
+    # Whether to only train on answer portions, zeroing out loss for text portions.
+    # Effect: When true, loss is only computed on answer tokens (text portion is masked).
+    # When false (default), trains on full text when no answer exists, or only on answer when answer exists.
+    # Use true for fine-tuning scenarios where you only want to learn from answers.
+    # Use false for pretraining where you want to learn from all text.
+
   # Optimizer Settings
   optimizer:
+    type: null
+    # Optimizer type to use. Options: "adamw_torch", "adamw_hf", "adamw_torch_fused", 
+    # "sgd", "adagrad", "adamw_8bit", "adamw_bnb_8bit", "lion", "lion_8bit", 
+    # "paged_adamw_8bit", "paged_lion_8bit", "rmsprop", etc.
+    # Effect: Selects the optimizer implementation. Default (null) uses "adamw_torch".
+    # "adamw_torch_fused" can be faster on modern GPUs. "adamw_8bit" reduces memory usage.
+    # Reference: https://huggingface.co/docs/transformers/main/en/main_classes/trainer#transformers.TrainingArguments.optim
+    
     lr: 1e-4
     # Learning rate for the optimizer.
     # Effect: Standard learning rate for pretraining. Higher than fine-tuning rates.
     # Typical range for pretraining: 1e-4 to 5e-4.
     
-    weight_decay: 0.1
+    weight_decay: 0.0
     # L2 regularization coefficient for the optimizer.
     # Effect: Standard weight decay for pretraining. Higher than fine-tuning values.
     # Typical range for pretraining: 0.1 to 0.2.
@@ -54,13 +72,6 @@ training:
     # Effect: Higher gamma for pretraining to emphasize later tokens more strongly.
     # Typical range for pretraining: 0.95 to 0.99.
     
-    dropout: 0.1
-    # Dropout rate for regularization during training.
-    # Effect: Standard dropout rate for pretraining. Prevents overfitting.
-    # Typical range for pretraining: 0.1 to 0.2.
-
-  # Training Schedule
-  schedule:
     num_epochs: 1
     # Number of complete passes through the training dataset.
     # Effect: Standard for pretraining. More epochs than fine-tuning.
@@ -76,12 +87,19 @@ training:
     # Effect: Simulates larger batch sizes. Effective batch size = batch_size × grad_accumulation_steps.
     # Typical range for pretraining: 2-8.
     
+    dropout: 0.0
+    # Dropout rate for regularization during training.
+    # Effect: Standard dropout rate for pretraining. Prevents overfitting.
+    # Typical range for pretraining: 0.1 to 0.2.
+
+  # Training Schedule
+  schedule:
     warmup_steps: 0
     # Number of warmup steps for learning rate scheduling.
     # Effect: Standard for pretraining. Gradual learning rate increase.
     # Typical range for pretraining: 0-1000 steps.
     
-    warmup_ratio: 0.03
+    warmup_ratio: 0.1
     # Warmup ratio as a fraction of total training steps.
     # Effect: Standard warmup ratio for pretraining. 3% of total steps.
     # Typical range for pretraining: 0.01 to 0.05.
@@ -90,8 +108,6 @@ training:
     # Type of learning rate scheduler to use.
     # Effect: Cosine annealing is standard for pretraining. Smooth decay.
     # Typical for pretraining: "cosine" or "linear".
-
-    
 
   # Training Control
   control:
@@ -109,13 +125,6 @@ training:
     # provides better monitoring but increases I/O overhead.
     # Reference: Standard ML training practice
 
-# Training Parameters
-training_params:
-  max_seq_length: 1024
-  # Maximum length of input sequences.
-  # Effect: Standard length for pretraining. Longer sequences for better context.
-  # Typical range for pretraining: 512-2048.
-
 # Output Configuration
 output:
   dir: "runs/default"
@@ -132,26 +141,28 @@ output:
   # better recovery options but increases I/O overhead and disk usage.
   # Reference: Standard ML training practice
 
-# Weights & Biases Configuration
-wandb:
-  project: "sequence-aware-pretraining"
-  # Weights & Biases project name for experiment tracking.
-  # Proposed by: Weights & Biases for ML experiment management.
-  # Effect: Groups related experiments together in the W&B dashboard.
-  # Should be consistent across related experiments.
-  # Reference: https://docs.wandb.ai/
-  
-  name: "default"
-  # Weights & Biases run name for this specific experiment.
-  # Proposed by: Weights & Biases for ML experiment management.
-  # Effect: Identifies this specific run in the W&B dashboard. Should be unique
-  # for each experiment to avoid confusion.
-  # Reference: https://docs.wandb.ai/
+# Logging Configuration
+logging:
+  wandb:
+    project: "sequence-aware-pretraining"
+    # Weights & Biases project name for experiment tracking.
+    # Proposed by: Weights & Biases for ML experiment management.
+    # Effect: Groups related experiments together in the W&B dashboard.
+    # Should be consistent across related experiments.
+    # Reference: https://docs.wandb.ai/
+    
+    name: "default"
+    # Weights & Biases run name for this specific experiment.
+    # Proposed by: Weights & Biases for ML experiment management.
+    # Effect: Identifies this specific run in the W&B dashboard. Should be unique
+    # for each experiment to avoid confusion.
+    # Reference: https://docs.wandb.ai/
 
-# Environment Variable Names for Authentication
-env_vars:
-  hf_token: "RUNPOD_HF_TOKEN"      # Hugging Face token environment variable name
-  # Environment variable name containing the Hugging Face authentication token.
-  
-  wandb_token: "RUNPOD_WANDB_TOKEN"  # Weights & Biases token environment variable name
-  # Environment variable name containing the Weights & Biases API key.
+# Authentication Configuration
+auth:
+  env_vars:
+    hf_token: "RUNPOD_HF_TOKEN"
+    # Environment variable name containing the Hugging Face authentication token.
+    
+    wandb_token: "RUNPOD_WANDB_TOKEN"
+    # Environment variable name containing the Weights & Biases API key.

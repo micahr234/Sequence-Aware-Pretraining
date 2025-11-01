@@ -2,48 +2,56 @@
 
 # Model Configuration
 model:
-  base_name: "meta-llama/Llama-3.1-8B"
+  base_name: "Qwen/Qwen3-4B-Base"
   output_name: "sequence-aware-baseline"
+  device: "auto"
 
 # Dataset Configuration
 dataset:
   name: "gsm8k"
-  max_examples: 100000
+  max_examples: null
 
 # Training Configuration
 training:
+  # Training Parameters
+  parameters:
+    max_seq_length: 2048
+    train_on_answers_only: true
+
   # Optimizer Settings
   optimizer:
     lr: 5e-4
-    weight_decay: 0.1
-    gamma: 0.99
-    dropout: 0.1
-
-  # Training Schedule
-  schedule:
+    weight_decay: 0.0
+    gamma: 0.0
     num_epochs: 1
     batch_size: 64
     grad_accumulation_steps: 1
+    dropout: 0.0
+
+  # Training Schedule
+  schedule:
     warmup_steps: 0
-    warmup_ratio: 0.03
-    scheduler_type: "cosine"
+    warmup_ratio: 0.0
+    scheduler_type: "constant"
 
   # Training Control
   control:
     seed: 42
-    log_every: 10
-
-# Training Parameters
-training_params:
-  max_seq_length: 2048
+    log_every: 1
 
 # Output Configuration
 output:
-  dir: "runs/sequence-aware-baseline"
+  dir: "runs/baseline"
   save_every: 1000
 
-# Weights & Biases Configuration
-wandb:
-  project: "sequence-aware-pretraining"
-  name: "baseline"
-  
+# Logging Configuration
+logging:
+  wandb:
+    project: "sequence-aware-pretraining"
+    name: "baseline"
+
+# Authentication Configuration
+auth:
+  env_vars:
+    hf_token: "RUNPOD_HF_TOKEN"
+    wandb_token: "RUNPOD_WANDB_TOKEN"

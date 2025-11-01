@@ -9,17 +9,18 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
     
     This trainer applies position-dependent weights to the standard cross-entropy loss,
     where later tokens in a sequence receive higher weights according to a discount factor gamma.
-    The weighting scheme follows: w_k = (1 - gamma^k) / (1 - gamma) for position k.
+    The weighting scheme follows: w_k = (1 - gamma^k) for position k.
+    - When gamma=0, weights are uniform: w_k = 1 (standard cross-entropy, no discounting).
+    - When gamma=1, weights become linear: w_k = k (maximum discounting).
     
     Args:
-        gamma (float): Discount factor in (0, 1]. Higher values give more weight to later tokens.
-                      When gamma=1, weights become linear: w_k = k.
+        gamma (float): Discount. Higher values give more weight to later tokens.
+                      gamma=0 gives uniform weights (no discounting), gamma=1 gives linear weights.
         *args: Arguments passed to SFTTrainer
         **kwargs: Keyword arguments passed to SFTTrainer
     """
     
     def __init__(self, *args, gamma: float = 0.98, **kwargs):
-        assert 0.0 < gamma <= 1.0, "gamma must be in (0, 1]"
         self.gamma = float(gamma)
         super().__init__(*args, **kwargs)
 
@@ -29,35 +30,32 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
         Build per-token weights w_k(gamma) aligned with label positions.
         
         Args:
-            labels: [B, T] with -100 for ignore positions (HF convention).
-                   For each row, let valid positions be where labels != -100.
-                   Index those valid positions as k=1..L_i and assign weight w_k.
+            labels: [B, T] tensor of labels. All positions are counted for weighting.
+                   Position index k starts from 0 and increments for each position.
         
         Returns:
-            weights: [B, T] tensor with position weights, zeros where labels == -100
+            weights: [B, T] tensor with position weights for all positions
         """
         device = labels.device
         B, T = labels.shape
-        valid = (labels != -100).to(torch.float32)              # [B, T]
         
-        # Build cumulative count per row for valid positions only
-        k = valid.cumsum(dim=1) * valid                         # k in {0..L_i} at valid positions
-        
-        # Ensure k is non-negative and handle edge cases
-        k = k.clamp_min(0)
+        # Build cumulative count per row for ALL positions (including invalid ones)
+        # k starts at 0 for first position, 1 for second, etc.
+        k = torch.arange(T, device=device, dtype=torch.float32).unsqueeze(0).expand(B, -1)  # [B, T]
 
-        if abs(1.0 - self.gamma) < 1e-8:
-            w = k.to(torch.float32)  # when gamma=1, w_k = k
+        if abs(self.gamma) < 1e-8:
+            # gamma = 0: uniform weights (all positions get weight 1)
+            w = torch.ones_like(k)
+        elif abs(1.0 - self.gamma) < 1e-8:
+            # gamma = 1: linear weights
+            w = k  # when gamma=1, w_k = k
         else:
-            # w_k = (1 - gamma^k) for k > 0, 0 for k = 0
+            # 0 < gamma < 1: discounted weights
+            # w_k = (1 - gamma^k) for k >= 0
             # Use a more numerically stable computation
-            gamma_pow_k = torch.pow(self.gamma, k.clamp_min(0))
-            w = (1.0 - gamma_pow_k).to(torch.float32)
-
-        # Zero out invalid spots explicitly
-        w = w * valid
+            w = (1.0 - torch.pow(self.gamma, k))
         
-        return w  # [B, T], zeros where labels == -100
+        return w  # [B, T], weights for all positions
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -73,36 +71,46 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
             loss: Weighted cross-entropy loss (scalar tensor for optimization)
             outputs: Model outputs (if return_outputs=True)
         """
-        labels = inputs.get("labels")
+        labels = inputs["labels"]
+
         outputs = model(**inputs)
         logits = outputs.logits  # [B, T, V]
-
-        # log p(w_k) at each labeled position
-        log_probs = F.log_softmax(logits, dim=-1)
         
-        # Ensure labels are within vocabulary bounds
-        vocab_size = logits.size(-1)
-        labels_clamped = labels.clamp(0, vocab_size - 1)
+        # Reshape logits and labels for cross_entropy: [B*T, V] and [B*T]
+        B, T, V = logits.shape
+        logits_flat = logits.view(-1, V)  # [B*T, V]
+        labels_flat = labels.view(-1)  # [B*T]
         
-        # Create mask for valid positions (not -100)
-        valid_mask = (labels != -100)
+        # Use standard PyTorch cross_entropy with reduction='none' to get per-token losses
+        # ignore_index=-100 handles invalid positions automatically
+        per_token_loss = F.cross_entropy(
+            logits_flat, 
+            labels_flat, 
+            reduction='none',
+            ignore_index=-100
+        )  # [B*T]
         
-        # Gather log probabilities, but only for valid positions
-        token_logp = log_probs.gather(dim=-1, index=labels_clamped.unsqueeze(-1)).squeeze(-1)  # [B, T]
+        # Reshape back to [B, T]
+        per_token_loss = per_token_loss.view(B, T)  # [B, T]
         
-        # Set invalid positions to 0 (they'll be masked out anyway)
-        token_logp = token_logp * valid_mask.float()
-
-        # Build weights for labeled positions
+        # Count valid tokens for normalization (ignore_index=-100 already sets invalid positions to loss=0)
+        num_valid_tokens = (labels != -100).sum()
+        if num_valid_tokens == 0:
+            raise ValueError(
+                "No valid tokens found in batch (all labels are -100). "
+                "This indicates all tokens are marked as ignored, which should not happen. "
+                "Check your data collator and preprocessing."
+            )
+        
+        # Build weights for all positions (including invalid ones, but they won't contribute to loss)
         with torch.no_grad():
-            weights = self._position_weights(labels)  # [B, T]
-            denom = (labels != -100).sum().clamp_min(1)
-
-        # Calculate unweighted loss (standard cross-entropy) for logging
-        unweighted_loss = -token_logp.sum() / denom
+            weights = self._position_weights(labels)  # [B, T], includes all positions
         
-        # Calculate weighted (negative) log-likelihood, averaged over valid tokens
-        weighted_loss = -(weights * token_logp).sum() / denom
+        # Calculate unweighted loss (standard cross-entropy) for logging
+        unweighted_loss = per_token_loss.sum() / num_valid_tokens
+        
+        # Calculate weighted loss: apply position weights to per-token losses
+        weighted_loss = (weights * per_token_loss).sum() / num_valid_tokens
 
         # Store unweighted loss for logging (accessible via trainer.log_metrics)
         if not hasattr(self, '_unweighted_loss'):
