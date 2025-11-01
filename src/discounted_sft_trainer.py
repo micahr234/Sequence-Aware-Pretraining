@@ -112,10 +112,13 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
         # Calculate weighted loss: apply position weights to per-token losses
         weighted_loss = (weights * per_token_loss).sum() / num_valid_tokens
 
-        # Store unweighted loss for logging (accessible via trainer.log_metrics)
+        # Store both losses for logging
         if not hasattr(self, '_unweighted_loss'):
             self._unweighted_loss = []
+        if not hasattr(self, '_weighted_loss'):
+            self._weighted_loss = []
         self._unweighted_loss.append(unweighted_loss.detach().cpu().item())
+        self._weighted_loss.append(weighted_loss.detach().cpu().item())
 
         return (weighted_loss, outputs) if return_outputs else weighted_loss
 
@@ -129,10 +132,21 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
         if hasattr(self, '_unweighted_loss') and self._unweighted_loss:
             return self._unweighted_loss[-1]
         return None
+    
+    def get_weighted_loss(self):
+        """
+        Get the most recent weighted loss value.
+        
+        Returns:
+            float: The most recent weighted loss value, or None if not available
+        """
+        if hasattr(self, '_weighted_loss') and self._weighted_loss:
+            return self._weighted_loss[-1]
+        return None
 
     def log(self, logs, start_time=None):
         """
-        Override logging to include unweighted loss.
+        Override logging to include both weighted and unweighted loss.
         
         Args:
             logs: Dictionary of metrics to log
@@ -142,6 +156,11 @@ class DiscountedLogSuffixSFTTrainer(SFTTrainer):
         unweighted_loss = self.get_unweighted_loss()
         if unweighted_loss is not None:
             logs['unweighted_loss'] = unweighted_loss
+        
+        # Add weighted loss to logs if available (note: 'loss' is already the weighted loss)
+        weighted_loss = self.get_weighted_loss()
+        if weighted_loss is not None:
+            logs['weighted_loss'] = weighted_loss
         
         # Call parent logging method
         super().log(logs, start_time)

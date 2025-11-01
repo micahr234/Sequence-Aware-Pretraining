@@ -26,8 +26,8 @@ from pathlib import Path
 # Suppress warnings
 warnings.filterwarnings("ignore", message=".*UnsupportedFieldAttributeWarning.*", category=UserWarning)
 
-# Add train_src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "train_src"))
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from train import train
 from config import load_config

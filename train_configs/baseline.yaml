@@ -10,22 +10,25 @@ model:
 dataset:
   name: "gsm8k"
   max_examples: null
+  question_reasoning_join_string: "\n\n"  # Join string between question and reasoning
+  reasoning_answer_join_string: "\n\nThe answer is: "  # Join string between reasoning and answer
 
 # Training Configuration
 training:
   # Training Parameters
   parameters:
-    max_seq_length: 2048
+    max_seq_length: 1024
     train_on_answers_only: true
 
   # Optimizer Settings
   optimizer:
+    type: adamw_8bit
     lr: 5e-4
     weight_decay: 0.0
     gamma: 0.0
     num_epochs: 1
-    batch_size: 64
-    grad_accumulation_steps: 1
+    batch_size: 8
+    grad_accumulation_steps: 4
     dropout: 0.0
 
   # Training Schedule
@@ -43,6 +46,14 @@ training:
 output:
   dir: "runs/baseline"
   save_every: 1000
+
+# Evaluation Configuration
+evaluation:
+  dataset: "gsm8k"  # Dataset to evaluate on
+  split: "test"  # Split to use for evaluation
+  max_examples: 100  # Maximum examples to evaluate (None for all)
+  interval_steps: 10  # Evaluate every N steps (None to disable)
+  answer_regex: "\\n\\nThe answer is:\\s*(?P<answer>.+?)(?:\\n|$)"  # Regex pattern to extract answer (uses named group "answer")
 
 # Logging Configuration
 logging:

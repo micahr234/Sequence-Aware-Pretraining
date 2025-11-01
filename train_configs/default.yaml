@@ -30,6 +30,18 @@ dataset:
   # Maximum number of examples to use from the dataset.
   # Effect: Limits the dataset size for faster experimentation. Set to null to use all examples.
   # Useful for debugging and quick experiments with smaller subsets.
+  
+  question_reasoning_join_string: "\n\n"
+  # Join string between question and reasoning.
+  # Effect: Used when constructing prompts with question and reasoning components.
+  # Example: question + question_reasoning_join_string + reasoning
+  # For GSM8K, this is typically "\n\n" to separate question from reasoning.
+  
+  reasoning_answer_join_string: "\n\nThe answer is: "
+  # Join string between reasoning and answer.
+  # Effect: Used to combine reasoning with final answer during training.
+  # Format: text (question + reasoning) + reasoning_answer_join_string + answer.
+  # This is the pattern the model learns for generating answers after reasoning.
 
 # Training Configuration
 training:
@@ -140,6 +152,32 @@ output:
   # Effect: Saves model checkpoints every N steps. More frequent saving provides
   # better recovery options but increases I/O overhead and disk usage.
   # Reference: Standard ML training practice
+
+# Evaluation Configuration (optional)
+evaluation:
+  dataset: null
+  # Dataset name to evaluate on during training (e.g., "gsm8k").
+  # Effect: Model will be evaluated on this dataset at specified intervals.
+  # Set to null to disable evaluation.
+  
+  split: "test"
+  # Dataset split to use for evaluation.
+  # Effect: Determines which split of the dataset to evaluate on.
+  
+  max_examples: null
+  # Maximum number of examples to evaluate (null for all).
+  # Effect: Limits evaluation size for faster training. Useful for quick checks.
+  
+  interval_steps: null
+  # Evaluate every N training steps (null to disable).
+  # Effect: Accuracy will be logged to wandb at these intervals.
+  # Example: 500 means evaluate every 500 steps.
+  
+  answer_regex: null
+  # Regex pattern to extract answer from model output (null to construct from reasoning_answer_join_string).
+  # Effect: Allows using a custom regex pattern to extract answers during evaluation.
+  # Example: "The answer is:\\s*(.+?)(?:\\n|$)" to match "The answer is: 42"
+  # Default: If null, constructs regex from reasoning_answer_join_string by escaping it and adding capture group.
 
 # Logging Configuration
 logging:

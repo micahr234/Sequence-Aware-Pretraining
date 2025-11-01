@@ -8,7 +8,7 @@ import argparse
 from typing import List, Optional
 
 from config import TestConfig, load_test_config
-from generator import ProbabilityGenerator
+from probability_test import ProbabilityGenerator
 from visualizer import ProbabilityVisualizer
 from utils import set_seed, load_prompts_from_file, ensure_output_directory, print_experiment_info
 

@@ -2,6 +2,7 @@
 Custom data collator that converts character-level attention masks to token-level masks.
 """
 
+import warnings
 from typing import Dict, List, Any
 import torch
 from transformers import DataCollatorForLanguageModeling
@@ -14,17 +15,29 @@ class AttentionMaskDataCollator(DataCollatorForLanguageModeling):
     labels (not -100), allowing gradients to flow only for those tokens.
     """
     
-    def __init__(self, tokenizer, train_on_answers_only=False, *args, **kwargs):
+    def __init__(
+        self, 
+        tokenizer, 
+        train_on_answers_only, 
+        question_reasoning_join_string: str,
+        reasoning_answer_join_string: str,
+        *args, 
+        **kwargs
+    ):
         """
         Args:
             tokenizer: Tokenizer to use
             train_on_answers_only: If True, only compute loss on answer portions.
                                   When an answer exists, text portion loss is zeroed out.
                                   When no answer exists, no loss is computed (all masked).
+            question_reasoning_join_string: Join string between question and reasoning (e.g., "\n\n")
+            reasoning_answer_join_string: Join string between reasoning and answer (e.g., "\n\nThe answer is: ")
         """
         super().__init__(tokenizer, *args, **kwargs)
         self.tokenizer = tokenizer
         self.train_on_answers_only = train_on_answers_only
+        self.question_reasoning_join_string = question_reasoning_join_string
+        self.reasoning_answer_join_string = reasoning_answer_join_string
     
     def _char_to_token_mask(self, text: str, char_mask: List[bool]) -> List[bool]:
         """
@@ -38,6 +51,7 @@ class AttentionMaskDataCollator(DataCollatorForLanguageModeling):
             token_mask: Token-level mask (list of bools, one per token)
         """
         max_length = getattr(self.tokenizer, 'model_max_length', None)
+        
         encoded = self.tokenizer(
             text,
             return_offsets_mapping=True,
@@ -50,12 +64,10 @@ class AttentionMaskDataCollator(DataCollatorForLanguageModeling):
         token_mask = []
         
         for start, end in offsets:
-            # Special tokens (BOS, EOS, etc.) have (0, 0) offset
             if start == 0 and end == 0:
                 token_mask.append(False)
                 continue
             
-            # If any character in this token's span is True, mark the token as True
             if end <= len(char_mask):
                 token_char_mask = char_mask[start:end]
                 token_mask.append(any(token_char_mask) if token_char_mask else False)
@@ -110,39 +122,29 @@ class AttentionMaskDataCollator(DataCollatorForLanguageModeling):
                         f"Feature keys: {list(f.keys())}"
                     )
                 
-                full_text = f"{text}\n\n{answer}"
+                full_text = text + self.reasoning_answer_join_string + answer
                 texts.append(full_text)
-                
-                # Create mask: False for text, True for answer
-                text_len = len(text)
-                separator_len = len("\n\n")
-                answer_len = len(answer)
-                char_mask = [False] * text_len + [False] * separator_len + [True] * answer_len
+                char_mask = [False] * len(text) + [True] * (len(full_text) - len(text))
                 char_masks.append(char_mask)
             elif self.train_on_answers_only:
-                # train_on_answers_only=True but no answer: skip this example (all masked)
-                # Create a dummy entry that will be fully masked
                 texts.append(text)
                 char_masks.append([False] * len(text))
             else:
-                # No answer and not answer-only mode: compute loss on entire text (pretraining mode)
                 texts.append(text)
                 char_masks.append([True] * len(text))
         
-        # Validate we have at least one example - should never happen with proper validation above
         if not texts:
             raise ValueError(
                 "No valid texts found in batch. This should not happen if preprocessing is correct."
             )
         
-        # Convert char-level masks to token-level masks
         token_masks = []
         for text, char_mask in zip(texts, char_masks):
             token_mask = self._char_to_token_mask(text, char_mask)
             token_masks.append(token_mask)
         
-        # Tokenize texts
         max_length = getattr(self.tokenizer, 'model_max_length', None)
+        
         batch = self.tokenizer(
             texts,
             padding=True,
@@ -151,19 +153,32 @@ class AttentionMaskDataCollator(DataCollatorForLanguageModeling):
             return_tensors="pt",
         )
         
-        # Create labels and mask out positions where token_mask is False
+        if max_length is not None and "attention_mask" in batch:
+            at_max_length = 0
+            attention_mask = batch["attention_mask"]
+            for attn_mask in attention_mask:
+                actual_length = attn_mask.sum().item()
+                if actual_length == max_length:
+                    at_max_length += 1
+            
+            if at_max_length > 0:
+                warnings.warn(
+                    f"Data truncation detected: {at_max_length} out of {len(texts)} examples "
+                    f"are at max_length={max_length} and may have been truncated.",
+                    UserWarning,
+                    stacklevel=2
+                )
+        
         labels = batch["input_ids"].clone()
         
         for i, token_mask in enumerate(token_masks):
             seq_len = labels.shape[1]
             
-            # Adjust token_mask length to match sequence length
             if len(token_mask) < seq_len:
                 token_mask = token_mask + [False] * (seq_len - len(token_mask))
             elif len(token_mask) > seq_len:
                 token_mask = token_mask[:seq_len]
             
-            # Set labels to -100 where mask is False (to ignore in loss)
             for j, mask_val in enumerate(token_mask):
                 if not mask_val:
                     labels[i, j] = -100

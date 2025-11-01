@@ -253,7 +253,7 @@ def load_split(name: str, split: str, max_examples: int = None) -> Dataset:
     try:
         config = DATASET_CONFIGS[name]
         
-        # Always use streaming mode
+        # Use non-streaming mode (load entire dataset into memory)
         # Include max_examples in split string if specified
         if max_examples and max_examples > 0:
             split_str = f"{split}[:{max_examples}]"
@@ -261,37 +261,36 @@ def load_split(name: str, split: str, max_examples: int = None) -> Dataset:
             split_str = split
         
         if config["config"]:
-            print(f"Loading dataset {config['dataset_name']} with config {config['config']} and split {split_str} (streaming mode)")
-            ds = load_dataset(config["dataset_name"], config["config"], split=split_str, streaming=True)
+            print(f"Loading dataset {config['dataset_name']} with config {config['config']} and split {split_str}")
+            ds = load_dataset(config["dataset_name"], config["config"], split=split_str, streaming=False)
         else:
-            print(f"Loading dataset {config['dataset_name']} with split {split_str} (streaming mode)")
-            ds = load_dataset(config["dataset_name"], split=split_str, streaming=True)
+            print(f"Loading dataset {config['dataset_name']} with split {split_str}")
+            ds = load_dataset(config["dataset_name"], split=split_str, streaming=False)
         
         print(f"Applying preprocessing for {name} dataset...")
         
-        # For streaming datasets, column_names might not be directly accessible
-        # Try to get column names from features if available
-        # Try to access column_names directly (works for non-streaming)
+        # Get column names for non-streaming datasets
         if hasattr(ds, 'column_names') and ds.column_names is not None:
             columns_to_remove = [c for c in ds.column_names if c not in ["text", "answer"]]
-        elif hasattr(ds, 'features') and ds.features is not None:
-            # For streaming datasets, use features dict to get column names
-            columns_to_remove = [c for c in ds.features.keys() if c not in ["text", "answer"]]
         else:
-            # If we can't determine columns, raise an error rather than silently continue
-            raise RuntimeError(
-                f"Cannot determine column names for dataset '{name}'. "
-                f"Dataset must have either 'column_names' attribute or 'features' attribute. "
-                f"This may indicate a problem with the dataset loading."
-            )
+            # Fallback: try features if column_names not available
+            if hasattr(ds, 'features') and ds.features is not None:
+                columns_to_remove = [c for c in ds.features.keys() if c not in ["text", "answer"]]
+            else:
+                raise RuntimeError(
+                    f"Cannot determine column names for dataset '{name}'. "
+                    f"Dataset must have either 'column_names' attribute or 'features' attribute. "
+                    f"This may indicate a problem with the dataset loading."
+                )
         
+        # Apply preprocessing with desc parameter (supported for non-streaming datasets)
         ds = ds.map(
             config["preprocess_fn"],
             remove_columns=columns_to_remove,
             desc=f"Preprocessing {name}"
         )
         
-        print(f"Successfully loaded and preprocessed streaming dataset {name}")
+        print(f"Successfully loaded and preprocessed dataset {name}")
         
         return ds
         

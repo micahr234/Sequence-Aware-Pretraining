@@ -1,4 +1,5 @@
 import os
+import re
 
 import torch
 from torch import nn
@@ -11,6 +12,7 @@ from data import load_split
 from utils import set_seed
 from discounted_sft_trainer import DiscountedLogSuffixSFTTrainer
 from data_collator import AttentionMaskDataCollator
+from evaluation_callback import AccuracyEvaluationCallback
 
 
 def train(cfg: Config):
@@ -51,9 +53,6 @@ def train(cfg: Config):
     
     # Load model
     print(f"\n📥 Loading Model: {cfg.base_model_name} on {device}")
-    # For single device, use None for device_map and move model manually
-    # device_map should only be used for multi-GPU setups or "auto" mode
-    # For explicit single devices (cpu, cuda, cuda:0, etc.), load on CPU then move
     is_single_device = device in ["cpu", "cuda"] or (isinstance(device, str) and device.startswith("cuda:"))
     device_map_kwarg = None if is_single_device else device
     model = AutoModelForCausalLM.from_pretrained(
@@ -61,7 +60,6 @@ def train(cfg: Config):
         torch_dtype=torch.float32,
         device_map=device_map_kwarg,
     )
-    # If device_map was None, move model to the specified device
     if device_map_kwarg is None:
         model = model.to(device)
 
@@ -70,12 +68,10 @@ def train(cfg: Config):
             if isinstance(module, nn.Dropout):
                 module.p = cfg.dropout
     
-    # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(cfg.base_model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
-    # Set model_max_length - raise error if it fails rather than silently continuing
     if not hasattr(tokenizer, 'model_max_length'):
         raise AttributeError(
             f"Tokenizer '{cfg.base_model_name}' does not have 'model_max_length' attribute. "
@@ -93,7 +89,6 @@ def train(cfg: Config):
                 f"Error: {e}"
             ) from e
 
-    # Setup training arguments
     training_args_kwargs = {
         "output_dir": cfg.output_dir,
         "per_device_train_batch_size": cfg.batch_size,
@@ -110,39 +105,60 @@ def train(cfg: Config):
         "remove_unused_columns": False,
         "push_to_hub": True,
         "hub_model_id": cfg.output_model_name,
-        "push_to_hub_private_repo": True,
+        "hub_private_repo": True,
     }
     
-    # Handle warmup: if warmup_steps is 0 or None, use warmup_ratio; otherwise use warmup_steps
-    # TrainingArguments will ignore warmup_ratio if warmup_steps is provided and > 0
-    if cfg.warmup_steps is not None and cfg.warmup_steps > 0:
+    if cfg.warmup_steps is not None:
         training_args_kwargs["warmup_steps"] = cfg.warmup_steps
-    elif cfg.warmup_ratio is not None:
+    if cfg.warmup_ratio is not None:
         training_args_kwargs["warmup_ratio"] = cfg.warmup_ratio
-    
-    # Add optimizer type if specified
-    if cfg.optimizer_type:
+    if cfg.optimizer_type is not None:
         training_args_kwargs["optim"] = cfg.optimizer_type
     
     training_args = TrainingArguments(**training_args_kwargs)
 
-    # Create data collator and trainer
-    # train_on_answers_only: If True, only train on answer portions (zero out loss for text)
-    # When enabled, examples without answers are fully masked (no loss computed)
     data_collator = AttentionMaskDataCollator(
         tokenizer=tokenizer, 
         mlm=False,
-        train_on_answers_only=cfg.train_on_answers_only
+        train_on_answers_only=cfg.train_on_answers_only,
+        question_reasoning_join_string=cfg.question_reasoning_join_string,
+        reasoning_answer_join_string=cfg.reasoning_answer_join_string,
     )
     
     trainer = DiscountedLogSuffixSFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         train_dataset=dataset,
         args=training_args,
         data_collator=data_collator,
         gamma=cfg.gamma,
     )
+    
+    if cfg.eval_dataset and cfg.eval_interval_steps:
+        print(f"\n📊 Setting up accuracy evaluation:")
+        print(f"   Dataset: {cfg.eval_dataset} ({cfg.eval_split or 'test'})")
+        print(f"   Interval: Every {cfg.eval_interval_steps} steps")
+        print(f"   Max examples: {cfg.eval_max_examples or 'all'}")
+        
+        eval_join_string = cfg.question_reasoning_join_string + cfg.reasoning_answer_join_string
+        
+        if cfg.eval_answer_regex is not None:
+            answer_regex = cfg.eval_answer_regex
+        else:
+            escaped = re.escape(cfg.reasoning_answer_join_string)
+            answer_regex = escaped + r'(.+?)(?:\n|$)'
+        
+        eval_callback = AccuracyEvaluationCallback(
+            eval_dataset_name=cfg.eval_dataset,
+            join_string=eval_join_string,
+            answer_regex=answer_regex,
+            eval_split=cfg.eval_split or "test",
+            eval_max_examples=cfg.eval_max_examples,
+            max_new_tokens=200,
+            eval_interval_steps=cfg.eval_interval_steps,
+            device=device,
+        )
+        trainer.add_callback(eval_callback)
 
     print("\n🎯 Starting Training")
     trainer.train()
