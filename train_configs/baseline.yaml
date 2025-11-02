@@ -10,8 +10,8 @@ model:
 dataset:
   name: "gsm8k"
   max_examples: null
-  question_reasoning_join_string: "\n\n"  # Join string between question and reasoning
-  reasoning_answer_join_string: "\n\nThe answer is: "  # Join string between reasoning and answer
+  question_template: "{question}\n\n"
+  answer_template: "\n\nThe answer is: {answer}"
 
 # Training Configuration
 training:

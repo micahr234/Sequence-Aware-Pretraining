@@ -15,13 +15,13 @@ def preprocess_c4(example: dict) -> dict:
         example: Raw example with "text" field
         
     Returns:
-        Dict with "text" and "answer" fields (answer equals text for pretraining)
+        Dict with "question", "reasoning", and "answer" fields (for pretraining)
     """
     text = example["text"]
     if not text or len(text) < 10:
         return None
     text = text.strip()
-    return {"text": text, "answer": text}
+    return {"question": "", "reasoning": "", "answer": text}
 
 
 def preprocess_wikipedia(example: dict) -> dict:
@@ -32,7 +32,7 @@ def preprocess_wikipedia(example: dict) -> dict:
         example: Raw example with "title" and "text" fields
         
     Returns:
-        Dict with "text" and "answer" fields (answer equals text for pretraining)
+        Dict with "question", "reasoning", and "answer" fields (for pretraining)
     """
     title = example["title"] if "title" in example else None
     text = example["text"]
@@ -46,7 +46,7 @@ def preprocess_wikipedia(example: dict) -> dict:
         formatted_text = text
     
     formatted_text = formatted_text.strip()
-    return {"text": formatted_text, "answer": formatted_text}
+    return {"question": "", "reasoning": "", "answer": formatted_text}
 
 
 def preprocess_bookcorpus(example: dict) -> dict:
@@ -57,7 +57,7 @@ def preprocess_bookcorpus(example: dict) -> dict:
         example: Raw example with "text" field
         
     Returns:
-        Dict with "text" and "answer" fields (answer equals text for pretraining)
+        Dict with "question", "reasoning", and "answer" fields (for pretraining)
     """
     text = example["text"]
     
@@ -66,7 +66,7 @@ def preprocess_bookcorpus(example: dict) -> dict:
     
     text = re.sub(r'\s+', ' ', text)
     text = text.strip()
-    return {"text": text, "answer": text}
+    return {"question": "", "reasoning": "", "answer": text}
 
 
 def preprocess_openwebtext(example: dict) -> dict:
@@ -77,7 +77,7 @@ def preprocess_openwebtext(example: dict) -> dict:
         example: Raw example with "text" field
         
     Returns:
-        Dict with "text" and "answer" fields (answer equals text for pretraining)
+        Dict with "question", "reasoning", and "answer" fields (for pretraining)
     """
     text = example["text"]
     
@@ -87,7 +87,7 @@ def preprocess_openwebtext(example: dict) -> dict:
     text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
     text = re.sub(r'[ \t]+', ' ', text)
     text = text.strip()
-    return {"text": text, "answer": text}
+    return {"question": "", "reasoning": "", "answer": text}
 
 
 def preprocess_gsm8k(example: dict) -> dict:
@@ -98,7 +98,7 @@ def preprocess_gsm8k(example: dict) -> dict:
         example: Raw example with "question" and "answer" fields
         
     Returns:
-        Dict with "text" (question + reasoning) and "answer" (final answer after "####")
+        Dict with "question", "reasoning", and "answer" fields
     """
     question = example["question"].strip()
     full_answer = example["answer"].strip()
@@ -113,9 +113,7 @@ def preprocess_gsm8k(example: dict) -> dict:
     if not answer:
         raise ValueError(f"GSM8K example has empty final answer after '####' marker. Question: {question[:100]}...")
     
-    text = f"{question}\n\n{reasoning}"
-    text = text.strip()
-    return {"text": text, "answer": answer}
+    return {"question": question, "reasoning": reasoning, "answer": answer}
 
 
 def preprocess_squad(example: dict) -> dict:
@@ -126,7 +124,7 @@ def preprocess_squad(example: dict) -> dict:
         example: Raw example with "question", "context", and "answers" fields
         
     Returns:
-        Dict with "text" (question + context) and "answer" (answer text or None)
+        Dict with "question", "reasoning", and "answer" fields
     """
     question = example["question"]
     context = example["context"] if "context" in example else None
@@ -139,14 +137,15 @@ def preprocess_squad(example: dict) -> dict:
     if answers and "text" in answers and answers["text"]:
         answer_text = answers["text"][0]
     
+    # Format question with context if available
     if context:
-        formatted_text = f"Question: {question}\nContext: {context}"
+        formatted_question = f"Question: {question}\nContext: {context}"
     else:
-        formatted_text = f"Question: {question}"
+        formatted_question = f"Question: {question}"
     
-    formatted_text = formatted_text.strip()
+    formatted_question = formatted_question.strip()
     answer_text = answer_text.strip() if answer_text else None
-    return {"text": formatted_text, "answer": answer_text}
+    return {"question": formatted_question, "reasoning": "", "answer": answer_text}
 
 
 def preprocess_openbookqa(example: dict) -> dict:
@@ -157,30 +156,30 @@ def preprocess_openbookqa(example: dict) -> dict:
         example: Raw example with "question_stem", "choices", and "answerKey" fields
         
     Returns:
-        Dict with "text" (question) and "answer" (correct choice text or None)
+        Dict with "question", "reasoning", and "answer" fields
     """
     question_stem = example["question_stem"]
     choices = example["choices"]
     answer_key = example["answerKey"].upper() if "answerKey" in example else None
     
-    formatted_text = f"Question: {question_stem}"
-    formatted_text = formatted_text.strip()
+    formatted_question = f"Question: {question_stem}"
+    formatted_question = formatted_question.strip()
     
     if not question_stem or not choices or not answer_key:
-        return {"text": formatted_text, "answer": None}
+        return {"question": formatted_question, "reasoning": "", "answer": None}
     
     choice_texts = choices["text"] if "text" in choices else None
     if not choice_texts:
-        return {"text": formatted_text, "answer": None}
+        return {"question": formatted_question, "reasoning": "", "answer": None}
     
     if answer_key and len(answer_key) == 1 and answer_key.isalpha():
         choice_idx = ord(answer_key) - ord('A')
         if 0 <= choice_idx < len(choice_texts):
             correct_answer = choice_texts[choice_idx]
             correct_answer = correct_answer.strip() if correct_answer else None
-            return {"text": formatted_text, "answer": correct_answer}
+            return {"question": formatted_question, "reasoning": "", "answer": correct_answer}
     
-    return {"text": formatted_text, "answer": None}
+    return {"question": formatted_question, "reasoning": "", "answer": None}
 
 
 # ============================================================================
@@ -200,7 +199,7 @@ def load_split(name: str, split: str, max_examples: int = None) -> Dataset:
         max_examples: Maximum number of examples to load (None for all)
         
     Returns:
-        Dataset with unified fields: {"text": str, "answer": str or None}
+        Dataset with unified fields: {"question": str, "reasoning": str, "answer": str or None}
         
     Supported datasets:
     - "c4": Clean Common Crawl dataset (recommended for broad pretraining)
@@ -271,11 +270,11 @@ def load_split(name: str, split: str, max_examples: int = None) -> Dataset:
         
         # Get column names for non-streaming datasets
         if hasattr(ds, 'column_names') and ds.column_names is not None:
-            columns_to_remove = [c for c in ds.column_names if c not in ["text", "answer"]]
+            columns_to_remove = [c for c in ds.column_names if c not in ["question", "reasoning", "answer"]]
         else:
             # Fallback: try features if column_names not available
             if hasattr(ds, 'features') and ds.features is not None:
-                columns_to_remove = [c for c in ds.features.keys() if c not in ["text", "answer"]]
+                columns_to_remove = [c for c in ds.features.keys() if c not in ["question", "reasoning", "answer"]]
             else:
                 raise RuntimeError(
                     f"Cannot determine column names for dataset '{name}'. "

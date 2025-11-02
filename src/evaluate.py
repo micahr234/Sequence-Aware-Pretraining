@@ -175,31 +175,12 @@ class AccuracyEvaluator:
         """
         print(f"\n📊 Loading Test Dataset: {self.config.dataset} ({self.config.test_split})")
         
-        # For GSM8K, load raw dataset to get just questions
-        if self.config.dataset == "gsm8k":
-            from datasets import load_dataset
-            import re
-            split_str = f"{self.config.test_split}[:{self.config.max_examples}]" if self.config.max_examples else self.config.test_split
-            raw_dataset = load_dataset("gsm8k", "main", split=split_str, streaming=False)
-            
-            def extract_question_and_answer(example):
-                question = example["question"].strip()
-                full_answer = example["answer"].strip()
-                marker_match = re.search(r"([\s\S]*?)\s*####\s*(.+)", full_answer)
-                if marker_match:
-                    answer = marker_match.group(2).replace(",", "").strip()
-                else:
-                    answer = ""
-                return {"question": question, "answer": answer}
-            
-            # Map to extract question and answer, keeping both fields
-            dataset = raw_dataset.map(extract_question_and_answer)
-        else:
-            dataset = load_split(
-                self.config.dataset,
-                self.config.test_split,
-                self.config.max_examples
-            )
+        # Use the same load_split() function as training for consistency
+        dataset = load_split(
+            self.config.dataset,
+            self.config.test_split,
+            self.config.max_examples
+        )
         
         print(f"📝 Evaluating on {len(dataset)} examples")
         
@@ -209,18 +190,15 @@ class AccuracyEvaluator:
         
         for i, example in enumerate(dataset):
             # Use just the question (not question + reasoning)
-            if "question" in example:
-                # Raw dataset format (e.g., GSM8K)
-                question = example["question"]
-                ground_truth = example.get("answer", "")
+            # load_split() returns "text" and "answer" fields for all datasets
+            text = example.get("text", "")
+            ground_truth = example.get("answer", "")
+            
+            # Extract question from text (for GSM8K, it's before first "\n\n")
+            if self.config.dataset == "gsm8k" and "\n\n" in text:
+                question = text.split("\n\n")[0]
             else:
-                # Preprocessed format - extract question (for GSM8K, it's before first "\n\n")
-                text = example.get("text", "")
-                if self.config.dataset == "gsm8k" and "\n\n" in text:
-                    question = text.split("\n\n")[0]
-                else:
-                    question = text
-                ground_truth = example.get("answer", "")
+                question = text
             
             # Format prompt: question only + join_string (model will generate reasoning + answer)
             prompt = question + self.config.join_string

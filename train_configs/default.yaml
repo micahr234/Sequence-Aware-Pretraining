@@ -31,17 +31,15 @@ dataset:
   # Effect: Limits the dataset size for faster experimentation. Set to null to use all examples.
   # Useful for debugging and quick experiments with smaller subsets.
   
-  question_reasoning_join_string: "\n\n"
-  # Join string between question and reasoning.
-  # Effect: Used when constructing prompts with question and reasoning components.
-  # Example: question + question_reasoning_join_string + reasoning
-  # For GSM8K, this is typically "\n\n" to separate question from reasoning.
+  question_template: "{question}\n\n"
+  # Template for formatting question.
+  # Effect: Used to format the question component. Can include {question}, {reasoning}, {answer} placeholders.
+  # Example: "{question}" or "Question: {question}\n"
   
-  reasoning_answer_join_string: "\n\nThe answer is: "
-  # Join string between reasoning and answer.
-  # Effect: Used to combine reasoning with final answer during training.
-  # Format: text (question + reasoning) + reasoning_answer_join_string + answer.
-  # This is the pattern the model learns for generating answers after reasoning.
+  answer_template: "\n\nThe answer is: {answer}"
+  # Template for formatting answer.
+  # Effect: Used to format the answer component. Can include {question}, {reasoning}, {answer} placeholders.
+  # Example: "\n\nThe answer is: {answer}" or "{reasoning}\n\nThe answer is: {answer}"
 
 # Training Configuration
 training:

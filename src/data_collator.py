@@ -8,7 +8,7 @@ import torch
 from transformers import DataCollatorForLanguageModeling
 
 
-class AttentionMaskDataCollator(DataCollatorForLanguageModeling):
+class TrainingCollator(DataCollatorForLanguageModeling):
     """
     Data collator that uses character-level attention masks to create token-level labels.
     Only tokens corresponding to characters with True in the attention mask will have
@@ -19,8 +19,8 @@ class AttentionMaskDataCollator(DataCollatorForLanguageModeling):
         self, 
         tokenizer, 
         train_on_answers_only, 
-        question_reasoning_join_string: str,
-        reasoning_answer_join_string: str,
+        question_template: str,
+        answer_template: str,
         *args, 
         **kwargs
     ):
@@ -30,159 +30,173 @@ class AttentionMaskDataCollator(DataCollatorForLanguageModeling):
             train_on_answers_only: If True, only compute loss on answer portions.
                                   When an answer exists, text portion loss is zeroed out.
                                   When no answer exists, no loss is computed (all masked).
-            question_reasoning_join_string: Join string between question and reasoning (e.g., "\n\n")
-            reasoning_answer_join_string: Join string between reasoning and answer (e.g., "\n\nThe answer is: ")
+            question_template: Template for formatting question (e.g., "{question}")
+            answer_template: Template for formatting answer (e.g., "{answer}" or "{reasoning}\n\nThe answer is: {answer}")
         """
         super().__init__(tokenizer, *args, **kwargs)
         self.tokenizer = tokenizer
         self.train_on_answers_only = train_on_answers_only
-        self.question_reasoning_join_string = question_reasoning_join_string
-        self.reasoning_answer_join_string = reasoning_answer_join_string
-    
-    def _char_to_token_mask(self, text: str, char_mask: List[bool]) -> List[bool]:
-        """
-        Convert character-level attention mask to token-level mask.
-        
-        Args:
-            text: The input text
-            char_mask: Character-level attention mask (list of bools, one per char)
-            
-        Returns:
-            token_mask: Token-level mask (list of bools, one per token)
-        """
-        max_length = getattr(self.tokenizer, 'model_max_length', None)
-        
-        encoded = self.tokenizer(
-            text,
-            return_offsets_mapping=True,
-            add_special_tokens=True,
-            truncation=max_length is not None,
-            max_length=max_length,
-        )
-        
-        offsets = encoded["offset_mapping"]
-        token_mask = []
-        
-        for start, end in offsets:
-            if start == 0 and end == 0:
-                token_mask.append(False)
-                continue
-            
-            if end <= len(char_mask):
-                token_char_mask = char_mask[start:end]
-                token_mask.append(any(token_char_mask) if token_char_mask else False)
-            else:
-                token_mask.append(False)
-        
-        return token_mask
+        self.question_template = question_template
+        self.answer_template = answer_template
     
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         """
-        Collate batch of examples, generating masks from text and answer fields.
+        Collate batch of examples, generating masks from question, reasoning, and answer fields.
+        
+        Tokenizes question, reasoning, and answer separately for easier mask creation.
         
         Args:
-            features: List of dicts with 'text' and 'answer' fields from dataset.
-                    - If answer exists: compute loss only on answer portion
+            features: List of dicts with 'question', 'reasoning', and 'answer' fields from dataset.
+                    - Format: question + question_reasoning_join_string + reasoning + reasoning_answer_join_string + answer
+                    - If answer exists: compute loss only on answer portion (and optionally reasoning)
                     - If answer is None/empty: compute loss on entire text (pretraining mode)
                     
         Returns:
             Batch dictionary with tokenized inputs and labels where only masked tokens
             have labels (not -100)
         """
-        texts = []
-        char_masks = []
-        
+        # Tokenize each part separately
+        all_input_ids = []
+        all_attention_masks = []
+        all_labels = []
+        max_seq_len = 0
         for f in features:
-            text = f["text"]
-            answer = f.get("answer")
+            question = f["question"]
+            reasoning = f["reasoning"]
+            answer = f["answer"]
             
-            # Validate text - raise error if invalid rather than silently skipping
-            if not isinstance(text, str):
-                raise ValueError(
-                    f"Expected 'text' to be a string, got {type(text).__name__}. "
-                    f"Feature keys: {list(f.keys())}"
-                )
-            if not text or len(text.strip()) == 0:
-                raise ValueError(
-                    f"Found empty text in feature. This should not happen after preprocessing. "
-                    f"Feature keys: {list(f.keys())}"
-                )
+            # Format question using template
+            formatted_question = self.question_template.format(question=question)
             
-            # If answer exists or train_on_answers_only is enabled
-            if answer:
-                # Validate answer is a string
-                if not isinstance(answer, str):
-                    raise ValueError(
-                        f"Expected 'answer' to be a string or None, got {type(answer).__name__}. "
-                        f"Feature keys: {list(f.keys())}"
-                    )
-                if not answer.strip():
-                    raise ValueError(
-                        f"Found empty answer string. Empty answers should be None, not empty strings. "
-                        f"Feature keys: {list(f.keys())}"
-                    )
-                
-                full_text = text + self.reasoning_answer_join_string + answer
-                texts.append(full_text)
-                char_mask = [False] * len(text) + [True] * (len(full_text) - len(text))
-                char_masks.append(char_mask)
-            elif self.train_on_answers_only:
-                texts.append(text)
-                char_masks.append([False] * len(text))
-            else:
-                texts.append(text)
-                char_masks.append([True] * len(text))
-        
-        if not texts:
-            raise ValueError(
-                "No valid texts found in batch. This should not happen if preprocessing is correct."
+            # Tokenize question separately
+            question_enc = self.tokenizer(
+                formatted_question,
+                add_special_tokens=False,
+                return_tensors=None,
             )
-        
-        token_masks = []
-        for text, char_mask in zip(texts, char_masks):
-            token_mask = self._char_to_token_mask(text, char_mask)
-            token_masks.append(token_mask)
-        
-        max_length = getattr(self.tokenizer, 'model_max_length', None)
-        
-        batch = self.tokenizer(
-            texts,
-            padding=True,
-            truncation=max_length is not None,
-            max_length=max_length,
-            return_tensors="pt",
-        )
-        
-        if max_length is not None and "attention_mask" in batch:
-            at_max_length = 0
-            attention_mask = batch["attention_mask"]
-            for attn_mask in attention_mask:
-                actual_length = attn_mask.sum().item()
-                if actual_length == max_length:
-                    at_max_length += 1
+            question_tokens = question_enc["input_ids"]
             
-            if at_max_length > 0:
-                warnings.warn(
-                    f"Data truncation detected: {at_max_length} out of {len(texts)} examples "
-                    f"are at max_length={max_length} and may have been truncated.",
-                    UserWarning,
-                    stacklevel=2
+            # Tokenize reasoning separately
+            reasoning_enc = self.tokenizer(
+                reasoning,
+                add_special_tokens=False,
+                return_tensors=None,
+            )
+            reasoning_tokens = reasoning_enc["input_ids"]
+            
+            # Tokenize answer separately (if it exists)
+            formatted_answer = self.answer_template.format(answer=answer)
+            answer_enc = self.tokenizer(
+                formatted_answer,
+                add_special_tokens=False,
+                return_tensors=None,
+            )
+            answer_tokens = answer_enc["input_ids"]
+
+            input_ids = question_tokens + reasoning_tokens + answer_tokens
+            attention_mask = [1] * len(question_tokens) + [1] * len(reasoning_tokens) + [1] * len(answer_tokens)
+            labels = question_tokens + reasoning_tokens + [-100] * len(answer_tokens)
+            
+            # error if input_ids is longer than the model's max length
+            if len(input_ids) > self.tokenizer.model_max_length:
+                raise ValueError(f"Input ids are longer than the model's max length: {len(input_ids)} > {self.tokenizer.model_max_length}")
+
+            all_input_ids.append(input_ids)
+            all_attention_masks.append(attention_mask)
+            all_labels.append(labels)
+            max_seq_len = max(max_seq_len, len(input_ids))
+        
+        # Pad sequences
+        padded_input_ids = []
+        padded_attention_masks = []
+        padded_labels = []
+        for input_ids, attention_mask, labels in zip(all_input_ids, all_attention_masks, all_labels):
+            padding_length = max_seq_len - len(input_ids)
+            input_ids = [self.tokenizer.pad_token_id] * padding_length + input_ids
+            attention_mask = [0] * padding_length + [1] * len(input_ids)
+            labels = [-100] * padding_length + labels
+            padded_input_ids.append(input_ids)
+            padded_attention_masks.append(attention_mask)
+            padded_labels.append(labels)
+        
+        batch = {
+            "input_ids": torch.tensor(padded_input_ids, dtype=torch.long),
+            "attention_mask": torch.tensor(padded_attention_masks, dtype=torch.long),
+            "labels": torch.tensor(padded_labels, dtype=torch.long),
+        }
+        
+        return batch
+
+
+class EvalDataCollator:
+    """
+    Data collator for evaluation that formats prompts and tokenizes on-the-fly.
+    
+    Follows the same format as TrainingCollator for consistency.
+    Returns answers in the batch for reference during evaluation.
+    """
+    def __init__(self, tokenizer, question_template: str):
+        self.tokenizer = tokenizer
+        self.question_template = question_template
+        
+    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Format prompts, tokenize, and include answers in batch.
+        
+        Args:
+            features: List of dicts with 'question' and 'answer' fields
+            
+        Returns:
+            Batch dictionary with tokenized inputs (input_ids, attention_mask) and answers
+        """
+        # Tokenize each part separately (same format as TrainingCollator)
+        all_input_ids = []
+        all_attention_masks = []
+        all_answers = []
+        max_seq_len = 0
+        for f in features:
+            question = f["question"]
+            ground_truth = f["answer"]
+            
+            # Format prompt using template
+            formatted_question = self.question_template.format(question=question)
+            question_enc = self.tokenizer(
+                formatted_question,
+                add_special_tokens=False,
+                return_tensors=None,
+            )
+            question_tokens = question_enc["input_ids"]
+            
+            input_ids = question_tokens
+            attention_mask = [1] * len(question_tokens)
+            
+            # Error if input_ids is longer than the model's max length
+            if len(input_ids) > self.tokenizer.model_max_length:
+                raise ValueError(
+                    f"Input ids are longer than the model's max length: "
+                    f"{len(input_ids)} > {self.tokenizer.model_max_length}"
                 )
-        
-        labels = batch["input_ids"].clone()
-        
-        for i, token_mask in enumerate(token_masks):
-            seq_len = labels.shape[1]
             
-            if len(token_mask) < seq_len:
-                token_mask = token_mask + [False] * (seq_len - len(token_mask))
-            elif len(token_mask) > seq_len:
-                token_mask = token_mask[:seq_len]
-            
-            for j, mask_val in enumerate(token_mask):
-                if not mask_val:
-                    labels[i, j] = -100
+            all_input_ids.append(input_ids)
+            all_attention_masks.append(attention_mask)
+            max_seq_len = max(max_seq_len, len(input_ids))
+            all_answers.append(ground_truth)
         
-        batch["labels"] = labels
+        # Pad sequences (left padding for generation)
+        padded_input_ids = []
+        padded_attention_masks = []
+        for input_ids, attention_mask in zip(all_input_ids, all_attention_masks):
+            padding_length = max_seq_len - len(input_ids)
+            input_ids = [self.tokenizer.pad_token_id] * padding_length + input_ids
+            attention_mask = [0] * padding_length + attention_mask
+            padded_input_ids.append(input_ids)
+            padded_attention_masks.append(attention_mask)
+        
+        batch = {
+            "input_ids": torch.tensor(padded_input_ids, dtype=torch.long),
+            "attention_mask": torch.tensor(padded_attention_masks, dtype=torch.long),
+            "answer": all_answers,
+        }
+        
         return batch
 

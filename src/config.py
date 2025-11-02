@@ -21,8 +21,8 @@ class TrainConfig:
     # Dataset parameters
     dataset: str
     max_examples: Optional[int]
-    question_reasoning_join_string: str  # Join string between question and reasoning (e.g., "\n\n")
-    reasoning_answer_join_string: str  # Join string between reasoning and answer (e.g., "\n\nThe answer is: ")
+    question_template: str  # Template for formatting question (e.g., "{question}")
+    answer_template: str  # Template for formatting answer (e.g., "{answer}" or "{reasoning}\n\nThe answer is: {answer}")
     
     # Optimizer settings
     optimizer_type: Optional[str]
@@ -194,8 +194,8 @@ def _build_train_cfg_dict(yaml_cfg: OmegaConf) -> dict:
         "device": yaml_cfg.model.device,
         "dataset": yaml_cfg.dataset.name,
         "max_examples": yaml_cfg.dataset.max_examples,
-        "question_reasoning_join_string": yaml_cfg.dataset.question_reasoning_join_string,
-        "reasoning_answer_join_string": yaml_cfg.dataset.reasoning_answer_join_string,
+        "question_template": yaml_cfg.dataset.question_template,
+        "answer_template": yaml_cfg.dataset.answer_template,
         "optimizer_type": yaml_cfg.training.optimizer.type,
         "lr": yaml_cfg.training.optimizer.lr,
         "weight_decay": yaml_cfg.training.optimizer.weight_decay,
