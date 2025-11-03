@@ -181,9 +181,7 @@ def train(cfg: Config):
         
         # Restore original padding side (eval collator will use left padding internally)
         tokenizer.padding_side = original_padding_side
-    
-    # Configure generation parameters for evaluation if enabled
-    if cfg.eval_dataset and cfg.eval_interval_steps:
+
         if hasattr(model, 'generation_config'):
             model.generation_config.max_new_tokens = 200
             model.generation_config.do_sample = False

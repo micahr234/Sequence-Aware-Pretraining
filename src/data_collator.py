@@ -58,17 +58,16 @@ class TrainingCollator(DataCollatorForLanguageModeling):
         # Tokenize each part separately
         all_input_ids = []
         all_attention_masks = []
-        all_labels = []
+        all_label_ids = []
         max_seq_len = 0
+
         for f in features:
             question = f["question"]
             reasoning = f["reasoning"]
             answer = f["answer"]
             
-            # Format question using template
-            formatted_question = self.question_template.format(question=question)
-            
             # Tokenize question separately
+            formatted_question = self.question_template.format(question=question)
             question_enc = self.tokenizer(
                 formatted_question,
                 add_special_tokens=False,
@@ -84,7 +83,7 @@ class TrainingCollator(DataCollatorForLanguageModeling):
             )
             reasoning_tokens = reasoning_enc["input_ids"]
             
-            # Tokenize answer separately (if it exists)
+            # Tokenize answer separately
             formatted_answer = self.answer_template.format(answer=answer)
             answer_enc = self.tokenizer(
                 formatted_answer,
@@ -95,7 +94,11 @@ class TrainingCollator(DataCollatorForLanguageModeling):
 
             input_ids = question_tokens + reasoning_tokens + answer_tokens
             attention_mask = [1] * len(question_tokens) + [1] * len(reasoning_tokens) + [1] * len(answer_tokens)
-            labels = question_tokens + reasoning_tokens + [-100] * len(answer_tokens)
+            
+            if self.train_on_answers_only:
+                label_ids = [-100] * len(question_tokens) + [-100] * len(reasoning_tokens) + answer_tokens
+            else:
+                label_ids = question_tokens + reasoning_tokens + answer_tokens
             
             # error if input_ids is longer than the model's max length
             if len(input_ids) > self.tokenizer.model_max_length:
@@ -103,26 +106,26 @@ class TrainingCollator(DataCollatorForLanguageModeling):
 
             all_input_ids.append(input_ids)
             all_attention_masks.append(attention_mask)
-            all_labels.append(labels)
+            all_label_ids.append(label_ids)
             max_seq_len = max(max_seq_len, len(input_ids))
         
         # Pad sequences
         padded_input_ids = []
         padded_attention_masks = []
-        padded_labels = []
-        for input_ids, attention_mask, labels in zip(all_input_ids, all_attention_masks, all_labels):
+        padded_label_ids = []
+        for input_ids, attention_mask, label_ids in zip(all_input_ids, all_attention_masks, all_label_ids):
             padding_length = max_seq_len - len(input_ids)
             input_ids = [self.tokenizer.pad_token_id] * padding_length + input_ids
             attention_mask = [0] * padding_length + [1] * len(input_ids)
-            labels = [-100] * padding_length + labels
+            label_ids = [-100] * padding_length + label_ids
             padded_input_ids.append(input_ids)
             padded_attention_masks.append(attention_mask)
-            padded_labels.append(labels)
+            padded_label_ids.append(label_ids)
         
         batch = {
             "input_ids": torch.tensor(padded_input_ids, dtype=torch.long),
             "attention_mask": torch.tensor(padded_attention_masks, dtype=torch.long),
-            "labels": torch.tensor(padded_labels, dtype=torch.long),
+            "label_ids": torch.tensor(padded_label_ids, dtype=torch.long),
         }
         
         return batch
