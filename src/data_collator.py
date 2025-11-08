@@ -125,7 +125,7 @@ class TrainingCollator(DataCollatorForLanguageModeling):
         batch = {
             "input_ids": torch.tensor(padded_input_ids, dtype=torch.long),
             "attention_mask": torch.tensor(padded_attention_masks, dtype=torch.long),
-            "label_ids": torch.tensor(padded_label_ids, dtype=torch.long),
+            "labels": torch.tensor(padded_label_ids, dtype=torch.long),
         }
         
         return batch

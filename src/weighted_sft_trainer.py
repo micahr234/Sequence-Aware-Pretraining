@@ -5,19 +5,19 @@ from typing import Optional, List, Dict, Any
 import wandb
 
 
-class DiscountedSFTTrainer(Seq2SeqTrainer):
+class WeightedSFTTrainer(Seq2SeqTrainer):
     """
-    A specialized SFTTrainer that implements discounted log-suffix weighting.
+    A specialized SFTTrainer that applies weighted cross-entropy loss.
     
-    This trainer applies position-dependent weights to the standard cross-entropy loss,
-    where later tokens in a sequence receive higher weights according to a discount factor gamma.
-    The weighting scheme follows: w_k = (1 - gamma^k) for position k.
-    - When gamma=0, weights are uniform: w_k = 1 (standard cross-entropy, no discounting).
-    - When gamma=1, weights become linear: w_k = k (maximum discounting).
+    This trainer applies weights to the standard cross-entropy loss using a weight matrix
+    passed through the inputs dictionary. The weight matrix should be of dimension [B, S, S]
+    where B is batch size and S is sequence length. Per-token weights are extracted by
+    summing over the last dimension of the weight matrix.
+    
+    If no weight matrix is provided in inputs, uniform weights (all ones) are used,
+    equivalent to standard cross-entropy loss.
     
     Args:
-        gamma (float): Discount. Higher values give more weight to later tokens.
-                      gamma=0 gives uniform weights (no discounting), gamma=1 gives linear weights.
         *args: Arguments passed to Seq2SeqTrainer
         **kwargs: Keyword arguments passed to Seq2SeqTrainer
     """
@@ -25,25 +25,21 @@ class DiscountedSFTTrainer(Seq2SeqTrainer):
     def __init__(
         self, 
         *args, 
-        gamma: float = 0.98,
         eval_gold_answers: Optional[List[str]] = None,
         eval_prompts_list: Optional[List[str]] = None,
         eval_answer_regex: Optional[str] = None,
         **kwargs
     ):
         """
-        Initialize DiscountedSFTTrainer.
+        Initialize WeightedSFTTrainer.
         
         Args:
-            gamma: Discount factor for position weighting
             eval_gold_answers: List of gold answer strings for evaluation (optional)
             eval_prompts_list: List of prompt strings for evaluation (optional)
             eval_answer_regex: Regex pattern to extract answers from model output (optional)
             *args: Arguments passed to Seq2SeqTrainer
             **kwargs: Keyword arguments passed to Seq2SeqTrainer
         """
-        self.gamma = float(gamma)
-        
         # Store evaluation info for compute_metrics
         self.eval_gold_answers = eval_gold_answers
         self.eval_prompts_list = eval_prompts_list
@@ -55,46 +51,14 @@ class DiscountedSFTTrainer(Seq2SeqTrainer):
         
         super().__init__(*args, **kwargs)
 
-    @torch.no_grad()
-    def _position_weights(self, labels: torch.Tensor) -> torch.Tensor:
-        """
-        Build per-token weights w_k(gamma) aligned with label positions.
-        
-        Args:
-            labels: [B, T] tensor of labels. All positions are counted for weighting.
-                   Position index k starts from 0 and increments for each position.
-        
-        Returns:
-            weights: [B, T] tensor with position weights for all positions
-        """
-        device = labels.device
-        B, T = labels.shape
-        
-        # Build cumulative count per row for ALL positions (including invalid ones)
-        # k starts at 0 for first position, 1 for second, etc.
-        k = torch.arange(T, device=device, dtype=torch.float32).unsqueeze(0).expand(B, -1)  # [B, T]
-
-        if abs(self.gamma) < 1e-8:
-            # gamma = 0: uniform weights (all positions get weight 1)
-            w = torch.ones_like(k)
-        elif abs(1.0 - self.gamma) < 1e-8:
-            # gamma = 1: linear weights
-            w = k  # when gamma=1, w_k = k
-        else:
-            # 0 < gamma < 1: discounted weights
-            # w_k = (1 - gamma^k) for k >= 0
-            # Use a more numerically stable computation
-            w = (1.0 - torch.pow(self.gamma, k))
-        
-        return w  # [B, T], weights for all positions
-
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
-        Replace standard CE with discounted log-suffix weighted CE.
+        Replace standard CE with weighted CE using weight matrix from inputs.
         
         Args:
             model: The model being trained
-            inputs: Dictionary containing input tensors including 'labels'
+            inputs: Dictionary containing input tensors including 'labels' and optionally 'weight_matrix'
+                   - 'weight_matrix': [B, T, T] tensor of weights (optional, falls back to uniform weights if not provided)
             return_outputs: Whether to return model outputs along with loss
             num_items_in_batch: Number of items in the batch (for compatibility)
             
@@ -103,14 +67,28 @@ class DiscountedSFTTrainer(Seq2SeqTrainer):
             outputs: Model outputs (if return_outputs=True)
         """
         labels = inputs["labels"]
+        
+        # Extract weight matrix if present (before passing to model)
+        weight_matrix = inputs["weight_matrix"]  # [B, T, T]
+        
+        # Create a copy of inputs without weight_matrix for model forward pass
+        model_inputs = {k: v for k, v in inputs.items() if k != "weight_matrix"}
 
-        outputs = model(**inputs)
+        outputs = model(**model_inputs)
         logits = outputs.logits  # [B, T, V]
         
-        # Reshape logits and labels for cross_entropy: [B*T, V] and [B*T]
-        B, T, V = logits.shape
-        logits_flat = logits.view(-1, V)  # [B*T, V]
-        labels_flat = labels.view(-1)  # [B*T]
+        # Shift logits and labels for causal language modeling
+        # logits[i] predicts token[i+1], so we shift:
+        # - logits: remove last position [B, T-1, V]
+        # - labels: remove first position (shift left) [B, T-1]
+        shift_logits = logits[..., :-1, :].contiguous()  # [B, T-1, V]
+        shift_labels = labels[..., 1:].contiguous()  # [B, T-1]
+        shift_weight_matrix = weight_matrix[..., 1:, 1:].contiguous()  # [B, T-1, T-1]
+        
+        # Reshape logits and labels for cross_entropy: [B*(T-1), V] and [B*(T-1)]
+        B, T_shift, V = shift_logits.shape
+        logits_flat = shift_logits.view(-1, V)  # [B*(T-1), V]
+        labels_flat = shift_labels.view(-1)  # [B*(T-1)]
         
         # Use standard PyTorch cross_entropy with reduction='none' to get per-token losses
         # ignore_index=-100 handles invalid positions automatically
@@ -119,13 +97,13 @@ class DiscountedSFTTrainer(Seq2SeqTrainer):
             labels_flat, 
             reduction='none',
             ignore_index=-100
-        )  # [B*T]
+        )  # [B*(T-1)]
         
-        # Reshape back to [B, T]
-        per_token_loss = per_token_loss.view(B, T)  # [B, T]
+        # Reshape back to [B, T-1]
+        per_token_loss = per_token_loss.view(B, T_shift)  # [B, T-1]
         
         # Count valid tokens for normalization (ignore_index=-100 already sets invalid positions to loss=0)
-        num_valid_tokens = (labels != -100).sum()
+        num_valid_tokens = (shift_labels != -100).sum()
         if num_valid_tokens == 0:
             raise ValueError(
                 "No valid tokens found in batch (all labels are -100). "
@@ -133,9 +111,10 @@ class DiscountedSFTTrainer(Seq2SeqTrainer):
                 "Check your data collator and preprocessing."
             )
         
-        # Build weights for all positions (including invalid ones, but they won't contribute to loss)
-        with torch.no_grad():
-            weights = self._position_weights(labels)  # [B, T], includes all positions
+        # Extract per-token weights by summing over the last dimension
+        # This aggregates the TxT matrix into per-token weights [B, T]
+        # Then shift to match the shifted logits/labels: [B, T-1]
+        weights = shift_weight_matrix.sum(dim=-1)  # [B, T]
         
         # Calculate unweighted loss (standard cross-entropy) for logging
         unweighted_loss = per_token_loss.sum() / num_valid_tokens

@@ -77,11 +77,6 @@ training:
     # Effect: Standard weight decay for pretraining. Higher than fine-tuning values.
     # Typical range for pretraining: 0.1 to 0.2.
     
-    gamma: 0.99
-    # Discount factor for position-based weighting in discounted log-suffix training.
-    # Effect: Higher gamma for pretraining to emphasize later tokens more strongly.
-    # Typical range for pretraining: 0.95 to 0.99.
-    
     num_epochs: 1
     # Number of complete passes through the training dataset.
     # Effect: Standard for pretraining. More epochs than fine-tuning.

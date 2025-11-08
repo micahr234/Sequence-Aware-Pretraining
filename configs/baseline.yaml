@@ -22,10 +22,9 @@ training:
 
   # Optimizer Settings
   optimizer:
-    type: adamw_8bit
+    type: adamw_torch
     lr: 5e-4
     weight_decay: 0.0
-    gamma: 0.0
     num_epochs: 1
     batch_size: 8
     grad_accumulation_steps: 4

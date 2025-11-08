@@ -10,7 +10,7 @@ import wandb
 from config import Config
 from data import load_split
 from utils import set_seed
-from discounted_sft_trainer import DiscountedSFTTrainer
+from discounted_sft_trainer import WeightedSFTTrainer
 from data_collator import TrainingCollator, EvalDataCollator
 
 
@@ -18,12 +18,12 @@ from data_collator import TrainingCollator, EvalDataCollator
 
 def train(cfg: Config):
     """
-    Main training function using Discounted SFT trainer.
+    Main training function using Weighted SFT trainer.
     
     Args:
         cfg: Configuration object containing all training parameters
     """
-    print("🚀 Starting Discounted SFT Training")
+    print("🚀 Starting Weighted SFT Training")
     print("=" * 60)
     
     set_seed(cfg.seed)
@@ -209,14 +209,13 @@ def train(cfg: Config):
         
         data_collator = DualDataCollator(data_collator, eval_data_collator)
     
-    trainer = DiscountedSFTTrainer(
+    trainer = WeightedSFTTrainer(
         model=model,
         processing_class=tokenizer,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         args=training_args,
         data_collator=data_collator,
-        gamma=cfg.gamma,
         eval_gold_answers=gold_answers,
         eval_prompts_list=prompts_list,
         eval_answer_regex=cfg.eval_answer_regex,
